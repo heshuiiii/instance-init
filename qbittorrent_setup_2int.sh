@@ -11,12 +11,12 @@ echo "=== qBittorrent双容器一键部署 ==="
 # 版本选择
 select_version() {
     echo "选择qBittorrent版本："
-    echo "1) 14.3.9 (LTS推荐)"
+    echo "1) 4.6.7 (LTS推荐)"
     echo "2) 5.0.3 (最新)"
     echo "3) latest"
     read -p "选择 [1-3, 默认1]: " choice
     case ${choice:-1} in
-        1) QB_VERSION="14.3.9" ;;
+        1) QB_VERSION="4.6.7" ;;
         2) QB_VERSION="5.0.3" ;;
         3) QB_VERSION="latest" ;;
         *) QB_VERSION="4.6.7" ;;
@@ -98,10 +98,9 @@ services:
     volumes:
       - ./NO1_QB/config:/config
       - ./NO1_QB/downloads:/downloads
-    network_mode: host
-    # ports:
-    #   - "8081:8081"
-    #   - "$QB1_PORT:$QB1_PORT"
+    ports:
+      - "8081:8081"
+      - "$QB1_PORT:$QB1_PORT"
     restart: unless-stopped
 
   qbittorrent-2:
@@ -115,10 +114,9 @@ services:
     volumes:
       - ./NO2_QB/config:/config
       - ./NO2_QB/downloads:/downloads
-    network_mode: host
-    # ports:
-    #   - "8082:8082"
-    #   - "$QB2_PORT:$QB2_PORT"
+    ports:
+      - "8082:8082"
+      - "$QB2_PORT:$QB2_PORT"
     restart: unless-stopped
 EOF
     
