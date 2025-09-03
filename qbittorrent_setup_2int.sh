@@ -98,9 +98,10 @@ services:
     volumes:
       - ./NO1_QB/config:/config
       - ./NO1_QB/downloads:/downloads
-    ports:
-      - "8081:8081"
-      - "$QB1_PORT:$QB1_PORT"
+    network_mode: host
+    # ports:
+    #   - "8081:8081"
+    #   - "$QB1_PORT:$QB1_PORT"
     restart: unless-stopped
 
   qbittorrent-2:
@@ -114,9 +115,10 @@ services:
     volumes:
       - ./NO2_QB/config:/config
       - ./NO2_QB/downloads:/downloads
-    ports:
-      - "8082:8082"
-      - "$QB2_PORT:$QB2_PORT"
+    network_mode: host
+    # ports:
+    #   - "8082:8082"
+    #   - "$QB2_PORT:$QB2_PORT"
     restart: unless-stopped
 EOF
     
