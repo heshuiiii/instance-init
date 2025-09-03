@@ -16,6 +16,28 @@ check_root() {
     fi
 }
 
+# 修复损坏的包依赖
+fix_broken_packages() {
+    echo "检查并修复损坏的包依赖..."
+    
+    # 检查是否有损坏的包
+    if dpkg -l | grep -q "linux-headers-4.14.129-bbrplus"; then
+        echo "发现损坏的内核头文件包，正在修复..."
+        
+        # 强制移除损坏的包
+        sudo dpkg --remove --force-remove-reinstreq linux-headers-4.14.129-bbrplus 2>/dev/null || true
+        
+        # 清理包缓存
+        sudo apt clean
+        sudo apt autoclean
+        
+        # 修复损坏的依赖
+        sudo apt --fix-broken install -y
+        
+        echo "包依赖修复完成"
+    fi
+}
+
 # 安装Docker
 install_docker() {
     echo "步骤1: 检查并安装Docker..."
@@ -24,10 +46,17 @@ install_docker() {
         echo "Docker已安装，版本: $(docker --version)"
     else
         echo "正在安装Docker..."
+        
+        # 修复损坏的包依赖
+        fix_broken_packages
+        
         # 适用于Debian/Ubuntu
         if command -v apt &> /dev/null; then
-            sudo apt update
-            sudo apt install -y apt-transport-https ca-certificates curl software-properties-common gnupg lsb-release
+            # 更新包索引，忽略错误
+            sudo apt update || true
+            
+            # 安装必要的包，使用--fix-missing参数
+            sudo apt install -y --fix-missing apt-transport-https ca-certificates curl software-properties-common gnupg lsb-release
             
             # 添加Docker官方GPG密钥
             curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
@@ -40,8 +69,16 @@ install_docker() {
                 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
             fi
             
+            # 再次更新包索引
             sudo apt update
-            sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            
+            # 安装Docker，如果失败则尝试替代方案
+            if ! sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+                echo "标准安装失败，尝试使用convenience脚本安装..."
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sudo sh get-docker.sh
+                rm get-docker.sh
+            fi
             
         # 适用于CentOS/RHEL
         elif command -v yum &> /dev/null; then
@@ -56,8 +93,12 @@ install_docker() {
         sudo systemctl start docker
         
         # 添加当前用户到docker组
-        sudo usermod -aG docker $USER
-        echo "Docker安装完成！注意：需要重新登录以使用户组生效"
+        if [ "$EUID" -ne 0 ]; then
+            sudo usermod -aG docker $USER
+            echo "Docker安装完成！注意：需要重新登录以使用户组生效"
+        else
+            echo "Docker安装完成！"
+        fi
     fi
 }
 
