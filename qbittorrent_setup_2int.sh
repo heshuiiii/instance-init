@@ -16,7 +16,7 @@ select_version() {
     echo "3) latest"
     read -p "选择 [1-3, 默认1]: " choice
     case ${choice:-1} in
-        1) QB_VERSION="4.6.7" ;;
+        1) QB_VERSION="14.3.9" ;;
         2) QB_VERSION="5.0.3" ;;
         3) QB_VERSION="latest" ;;
         *) QB_VERSION="4.6.7" ;;
@@ -247,8 +247,17 @@ show_results() {
     echo "  NO2: http://$server_ip:8082"
     echo ""
     echo "🔑 登录信息:"
-    echo "  用户名: heshui"
-    echo "  密码: $RANDOM_PASS"
+    if [[ -n "$HASHED_PASS" ]]; then
+        echo "  用户名: heshui"
+        echo "  密码: $RANDOM_PASS"
+    else
+        echo "  用户名: admin"
+        echo "  NO1临时密码: ${TEMP_PASS1:-请查看容器日志}"
+        echo "  NO2临时密码: ${TEMP_PASS2:-请查看容器日志}"
+        echo ""
+        echo "⚠️  Python3未安装，无法生成自定义密码哈希"
+        echo "     请使用上面的临时密码登录，然后在WebUI中设置新密码"
+    fi
     echo ""
     echo "⚙️ 配置信息:"
     echo "  版本: qBittorrent $QB_VERSION"
@@ -265,11 +274,25 @@ show_results() {
     echo ""
     
     # 保存密码到文件
-    echo "用户名: heshui" > login_info.txt
-    echo "密码: $RANDOM_PASS" >> login_info.txt
+    if [[ -n "$HASHED_PASS" ]]; then
+        echo "用户名: heshui" > login_info.txt
+        echo "密码: $RANDOM_PASS" >> login_info.txt
+    else
+        echo "用户名: admin" > login_info.txt
+        echo "NO1临时密码: $TEMP_PASS1" >> login_info.txt
+        echo "NO2临时密码: $TEMP_PASS2" >> login_info.txt
+    fi
     echo "NO1端口: $QB1_PORT" >> login_info.txt
     echo "NO2端口: $QB2_PORT" >> login_info.txt
     echo "✅ 登录信息已保存到 login_info.txt"
+    
+    # 显示查看临时密码的命令
+    if [[ -z "$HASHED_PASS" ]]; then
+        echo ""
+        echo "📋 查看临时密码命令:"
+        echo "  docker logs qb-no1 | grep 'temporary password'"
+        echo "  docker logs qb-no2 | grep 'temporary password'"
+    fi
 }
 
 # 主流程
