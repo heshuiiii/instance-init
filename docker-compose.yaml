@@ -1,0 +1,17 @@
+version: "3.9"
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.0.3
+    container_name: qbittorrent
+    network_mode: host   # 直接使用宿主机网络
+    environment:
+      - PUID=1000                # 宿主机用户ID
+      - PGID=1000                # 宿主机用户组ID
+      - TZ=Asia/Shanghai         # 时区
+      - WEBUI_PORT=8081          # WebUI端口
+      - QBITTORRENT__USERNAME=heshui   # 账号
+      - QBITTORRENT__PASSWORD=1wuhongli     # 密码
+    volumes:
+      - ./qbittorrent/config:/config
+      - ./qbittorrent/downloads:/downloads
+    restart: unless-stopped
