@@ -11,12 +11,12 @@ echo "=== qBittorrent双容器一键部署 ==="
 # 版本选择
 select_version() {
     echo "选择qBittorrent版本："
-    echo "1) 4.6.7 (LTS推荐)"
+    echo "1) 14.3.9 (LTS推荐)"
     echo "2) 5.0.3 (最新)"
     echo "3) latest"
     read -p "选择 [1-3, 默认1]: " choice
     case ${choice:-1} in
-        1) QB_VERSION="4.6.7" ;;
+        1) QB_VERSION="14.3.9" ;;
         2) QB_VERSION="5.0.3" ;;
         3) QB_VERSION="latest" ;;
         *) QB_VERSION="4.6.7" ;;
