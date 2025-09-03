@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# 增强版qBittorrent双容器部署脚本
-# 新增功能：简体中文WebUI、随机UPnP端口、取消连接数限制、种子不排队
-# GitHub快速执行：curl -sSL https://raw.githubusercontent.com/heshuiiii/commad-use/main/qbittorrent_setup_2int.sh | bash
+# 增强版qBittorrent双容器部署脚本 - 重构版
+# 新增功能：版本选择、简体中文WebUI、随机UPnP端口、取消连接数限制、种子不排队
+# GitHub快速执行：curl -sSL https://raw.githubusercontent.com/heshuiiii/commad-use/main/qbittorrent_setup_enhanced.sh | bash
 
 set -e
 
-echo "=== 增强版qBittorrent双容器部署脚本 ==="
+echo "=== 增强版qBittorrent双容器部署脚本 - 重构版 ==="
 echo "开始执行部署..."
 
 # 检查是否为root用户
@@ -14,6 +14,71 @@ check_root() {
     if [[ $EUID -eq 0 ]]; then
         echo "警告：正在以root用户运行"
     fi
+}
+
+# 版本选择菜单
+select_qb_version() {
+    echo "=========================================="
+    echo "请选择qBittorrent版本："
+    echo "=========================================="
+    echo "1) qBittorrent 4.6.7 (LTS 长期支持版)"
+    echo "2) qBittorrent 5.0.3 (最新版)"
+    echo "3) qBittorrent 5.0.2 (稳定版)"
+    echo "4) qBittorrent 4.6.6 (经典版)"
+    echo "5) qBittorrent latest (最新开发版)"
+    echo "6) 自定义版本"
+    echo "=========================================="
+    
+    while true; do
+        read -p "请输入选项 [1-6]: " choice
+        case $choice in
+            1)
+                QB_VERSION="4.6.7"
+                QB_IMAGE="linuxserver/qbittorrent:4.6.7"
+                echo "已选择: qBittorrent $QB_VERSION (LTS版)"
+                break
+                ;;
+            2)
+                QB_VERSION="5.0.3"
+                QB_IMAGE="linuxserver/qbittorrent:5.0.3"
+                echo "已选择: qBittorrent $QB_VERSION (最新版)"
+                break
+                ;;
+            3)
+                QB_VERSION="5.0.2"
+                QB_IMAGE="linuxserver/qbittorrent:5.0.2"
+                echo "已选择: qBittorrent $QB_VERSION (稳定版)"
+                break
+                ;;
+            4)
+                QB_VERSION="4.6.6"
+                QB_IMAGE="linuxserver/qbittorrent:4.6.6"
+                echo "已选择: qBittorrent $QB_VERSION (经典版)"
+                break
+                ;;
+            5)
+                QB_VERSION="latest"
+                QB_IMAGE="linuxserver/qbittorrent:latest"
+                echo "已选择: qBittorrent $QB_VERSION (最新开发版)"
+                break
+                ;;
+            6)
+                read -p "请输入自定义版本号 (例如: 4.6.5): " custom_version
+                if [[ -n "$custom_version" ]]; then
+                    QB_VERSION="$custom_version"
+                    QB_IMAGE="linuxserver/qbittorrent:$custom_version"
+                    echo "已选择: qBittorrent $QB_VERSION (自定义版)"
+                    break
+                else
+                    echo "版本号不能为空，请重新输入"
+                fi
+                ;;
+            *)
+                echo "无效选项，请重新选择"
+                ;;
+        esac
+    done
+    echo ""
 }
 
 # 修复损坏的包依赖
@@ -145,13 +210,9 @@ generate_random_ports() {
         QB2_PORT=$((20000 + RANDOM % 45000))
     done
     
-    # 默认UPnP端口
-    DEFAULT_UPNP_PORT=54889
-    
     echo "生成的端口配置："
     echo "qBittorrent NO1 UPnP端口: $QB1_PORT"
     echo "qBittorrent NO2 UPnP端口: $QB2_PORT"
-    echo "默认UPnP端口: $DEFAULT_UPNP_PORT"
 }
 
 # 创建目录结构
@@ -180,7 +241,7 @@ version: '3.8'
 
 services:
   qbittorrent-1:
-    image: linuxserver/qbittorrent:5.0.3
+    image: $QB_IMAGE
     container_name: qbittorrent-no1
     environment:
       - PUID=1000
@@ -194,7 +255,7 @@ services:
     restart: unless-stopped
 
   qbittorrent-2:
-    image: linuxserver/qbittorrent:5.0.3
+    image: $QB_IMAGE
     container_name: qbittorrent-no2
     environment:
       - PUID=1000
@@ -208,7 +269,7 @@ services:
     restart: unless-stopped
 EOF
 
-    echo "Docker Compose配置文件创建完成 (使用host网络模式)"
+    echo "Docker Compose配置文件创建完成 (版本: $QB_VERSION)"
 }
 
 # 设置目录权限
@@ -222,18 +283,51 @@ set_permissions() {
     echo "目录权限设置完成"
 }
 
-# 启动容器
-start_containers() {
-    echo "步骤7: 启动qBittorrent容器..."
+# 初次启动获取默认密码
+first_startup() {
+    echo "步骤7: 初次启动qBittorrent容器获取默认密码..."
     
-    # 拉取镜像并启动容器
+    # 拉取镜像
     $COMPOSE_CMD pull
+    
+    # 启动容器
     $COMPOSE_CMD up -d
     
-    echo "容器启动完成！"
+    echo "容器启动中，等待初始化完成..."
+    sleep 30
+    
+    # 获取默认密码
     echo ""
-    echo "等待容器初始化..."
-    sleep 15
+    echo "=== 获取默认登录密码 ==="
+    echo ""
+    echo "qBittorrent NO1 默认密码："
+    QB1_PASSWORD=$(docker logs qbittorrent-no1 2>&1 | grep -i "temporary password" | tail -1 | sed -n 's/.*temporary password is: \([A-Za-z0-9]*\).*/\1/p')
+    if [[ -n "$QB1_PASSWORD" ]]; then
+        echo "用户名: admin"
+        echo "密码: $QB1_PASSWORD"
+    else
+        echo "未找到临时密码，检查容器日志："
+        docker logs qbittorrent-no1 | tail -20
+    fi
+    
+    echo ""
+    echo "qBittorrent NO2 默认密码："
+    QB2_PASSWORD=$(docker logs qbittorrent-no2 2>&1 | grep -i "temporary password" | tail -1 | sed -n 's/.*temporary password is: \([A-Za-z0-9]*\).*/\1/p')
+    if [[ -n "$QB2_PASSWORD" ]]; then
+        echo "用户名: admin"
+        echo "密码: $QB2_PASSWORD"
+    else
+        echo "未找到临时密码，检查容器日志："
+        docker logs qbittorrent-no2 | tail -20
+    fi
+    
+    # 保存密码到文件
+    echo "NO1_PASSWORD=$QB1_PASSWORD" > .qb_passwords
+    echo "NO2_PASSWORD=$QB2_PASSWORD" >> .qb_passwords
+    chmod 600 .qb_passwords
+    
+    echo ""
+    echo "默认密码已保存到 .qb_passwords 文件"
 }
 
 # 创建增强配置文件
@@ -241,6 +335,9 @@ create_enhanced_config() {
     local config_dir=$1
     local upnp_port=$2
     local webui_port=$3
+    
+    # 等待容器停止
+    sleep 5
     
     cat > "$config_dir/qBittorrent/qBittorrent.conf" << EOF
 [Application]
@@ -285,18 +382,15 @@ WebUI\\Password_PBKDF2="@ByteArray(PvVGYlQW5iE5OOyX5HfEgQ==:OEZGHdLGBJNqOlNc+G/Q
 EOF
 }
 
-# 配置qBittorrent
-configure_qbittorrent() {
-    echo "步骤8: 配置qBittorrent增强设置..."
+# 应用增强配置
+apply_enhanced_config() {
+    echo "步骤8: 应用增强配置..."
     
-    # 等待容器完全启动
-    echo "等待qBittorrent服务完全启动..."
-    sleep 20
-    
-    # 停止容器以修改配置
+    # 停止容器
     $COMPOSE_CMD stop
+    echo "容器已停止，开始配置..."
     
-    # 创建配置目录
+    # 确保配置目录存在
     mkdir -p NO1_QB/config/qBittorrent
     mkdir -p NO2_QB/config/qBittorrent
     
@@ -312,16 +406,72 @@ configure_qbittorrent() {
     sudo chown -R 1000:1000 NO1_QB/config NO2_QB/config
     chmod -R 644 NO1_QB/config/qBittorrent/qBittorrent.conf NO2_QB/config/qBittorrent/qBittorrent.conf
     
-    # 重启容器以应用配置
+    # 重启容器
+    echo "重新启动容器..."
     $COMPOSE_CMD up -d
-    
-    echo "增强配置完成，正在重启容器..."
     sleep 15
+    
+    echo "增强配置已应用！"
 }
 
-# 创建快速管理脚本
+# 创建密码查询脚本
+create_password_script() {
+    echo "步骤9: 创建密码查询脚本..."
+    
+    cat > check_passwords.sh << 'EOF'
+#!/bin/bash
+# qBittorrent密码查询脚本
+
+echo "=== qBittorrent密码查询 ==="
+echo ""
+
+# 方法1：从保存的密码文件读取
+if [[ -f ".qb_passwords" ]]; then
+    echo "从保存的密码文件读取："
+    cat .qb_passwords
+    echo ""
+fi
+
+# 方法2：从容器日志获取
+echo "从容器日志获取最新密码："
+echo ""
+
+echo "qBittorrent NO1:"
+QB1_TEMP_PASS=$(docker logs qbittorrent-no1 2>&1 | grep -i "temporary password" | tail -1)
+if [[ -n "$QB1_TEMP_PASS" ]]; then
+    echo "$QB1_TEMP_PASS"
+else
+    echo "未找到临时密码日志"
+    # 尝试查找其他相关日志
+    docker logs qbittorrent-no1 2>&1 | grep -i "password\|login\|web.*ui" | tail -5
+fi
+
+echo ""
+echo "qBittorrent NO2:"
+QB2_TEMP_PASS=$(docker logs qbittorrent-no2 2>&1 | grep -i "temporary password" | tail -1)
+if [[ -n "$QB2_TEMP_PASS" ]]; then
+    echo "$QB2_TEMP_PASS"
+else
+    echo "未找到临时密码日志"
+    # 尝试查找其他相关日志
+    docker logs qbittorrent-no2 2>&1 | grep -i "password\|login\|web.*ui" | tail -5
+fi
+
+echo ""
+echo "增强配置密码（如果已应用）："
+echo "用户名: heshui"
+echo "密码: 1wuhongli"
+echo ""
+echo "如果无法使用增强配置密码，请使用上面显示的临时密码"
+EOF
+
+    chmod +x check_passwords.sh
+    echo "密码查询脚本创建完成: ./check_passwords.sh"
+}
+
+# 创建管理脚本
 create_management_script() {
-    echo "步骤9: 创建管理脚本..."
+    echo "步骤10: 创建管理脚本..."
     
     cat > qb_manage.sh << 'EOF'
 #!/bin/bash
@@ -346,8 +496,16 @@ case "$1" in
         $COMPOSE_CMD restart
         ;;
     logs)
-        echo "查看日志..."
-        $COMPOSE_CMD logs -f
+        if [[ "$2" == "1" || "$2" == "no1" ]]; then
+            echo "查看NO1日志..."
+            docker logs -f qbittorrent-no1
+        elif [[ "$2" == "2" || "$2" == "no2" ]]; then
+            echo "查看NO2日志..."
+            docker logs -f qbittorrent-no2
+        else
+            echo "查看所有日志..."
+            $COMPOSE_CMD logs -f
+        fi
         ;;
     status)
         echo "查看容器状态..."
@@ -362,17 +520,30 @@ case "$1" in
         echo "删除容器（保留数据）..."
         $COMPOSE_CMD down
         ;;
+    password)
+        ./check_passwords.sh
+        ;;
+    reset)
+        echo "重置到默认配置..."
+        $COMPOSE_CMD stop
+        rm -rf NO1_QB/config/qBittorrent/qBittorrent.conf
+        rm -rf NO2_QB/config/qBittorrent/qBittorrent.conf
+        $COMPOSE_CMD start
+        echo "已重置，请等待30秒后运行 './qb_manage.sh password' 查看新密码"
+        ;;
     *)
-        echo "用法: $0 {start|stop|restart|logs|status|update|down}"
+        echo "用法: $0 {start|stop|restart|logs [1|2]|status|update|down|password|reset}"
         echo ""
         echo "命令说明:"
-        echo "  start   - 启动容器"
-        echo "  stop    - 停止容器"
-        echo "  restart - 重启容器"
-        echo "  logs    - 查看实时日志"
-        echo "  status  - 查看容器状态"
-        echo "  update  - 更新镜像并重启容器"
-        echo "  down    - 删除容器（保留数据）"
+        echo "  start     - 启动容器"
+        echo "  stop      - 停止容器"
+        echo "  restart   - 重启容器"
+        echo "  logs      - 查看实时日志 (可指定1或2查看单个容器)"
+        echo "  status    - 查看容器状态"
+        echo "  update    - 更新镜像并重启容器"
+        echo "  down      - 删除容器（保留数据）"
+        echo "  password  - 查看登录密码"
+        echo "  reset     - 重置为默认配置"
         exit 1
         ;;
 esac
@@ -385,30 +556,49 @@ EOF
 # 显示部署结果
 show_results() {
     echo ""
-    echo "=== 增强版部署完成！ ==="
+    echo "=== 部署完成！=== "
     echo ""
-    echo "qBittorrent容器信息 (HOST网络模式 + 增强配置)："
+    echo "qBittorrent容器信息："
     echo "┌─────────────────────────────────────────────────────┐"
-    echo "│ qBittorrent NO1 - 增强版                            │"
+    echo "│ qBittorrent NO1 - $QB_VERSION                        │"
     echo "│ 访问地址: http://$(hostname -I | awk '{print $1}'):8081             │"
     echo "│ 本地访问: http://localhost:8081                     │"
-    echo "│ 用户名: heshui                                      │"
-    echo "│ 密码: 1wuhongli                                    │"
     echo "│ UPnP端口: $QB1_PORT                                  │"
     echo "│ 配置目录: ./NO1_QB/config                           │"
     echo "│ 下载目录: ./NO1_QB/downloads                        │"
     echo "├─────────────────────────────────────────────────────┤"
-    echo "│ qBittorrent NO2 - 增强版                            │"
+    echo "│ qBittorrent NO2 - $QB_VERSION                        │"
     echo "│ 访问地址: http://$(hostname -I | awk '{print $1}'):8082             │"
     echo "│ 本地访问: http://localhost:8082                     │"
-    echo "│ 用户名: heshui                                      │"
-    echo "│ 密码: 1wuhongli                                    │"
     echo "│ UPnP端口: $QB2_PORT                                  │"
     echo "│ 配置目录: ./NO2_QB/config                           │"
     echo "│ 下载目录: ./NO2_QB/downloads                        │"
     echo "└─────────────────────────────────────────────────────┘"
     echo ""
-    echo "增强功能已启用："
+    echo "🔑 登录信息："
+    echo "方式1 - 增强配置密码（推荐）："
+    echo "用户名: heshui"
+    echo "密码: 1wuhongli"
+    echo ""
+    echo "方式2 - 默认临时密码："
+    if [[ -n "$QB1_PASSWORD" ]]; then
+        echo "NO1 - 用户名: admin, 密码: $QB1_PASSWORD"
+    fi
+    if [[ -n "$QB2_PASSWORD" ]]; then
+        echo "NO2 - 用户名: admin, 密码: $QB2_PASSWORD"
+    fi
+    echo ""
+    echo "🔧 常用管理命令："
+    echo "./qb_manage.sh password  # 查看所有密码"
+    echo "./qb_manage.sh start     # 启动容器"
+    echo "./qb_manage.sh stop      # 停止容器"
+    echo "./qb_manage.sh restart   # 重启容器"
+    echo "./qb_manage.sh logs 1    # 查看NO1日志"
+    echo "./qb_manage.sh logs 2    # 查看NO2日志"
+    echo "./qb_manage.sh reset     # 重置为默认配置"
+    echo ""
+    echo "✨ 增强功能："
+    echo "✓ 版本: qBittorrent $QB_VERSION"
     echo "✓ WebUI语言: 简体中文"
     echo "✓ UPnP端口: 随机生成 (NO1: $QB1_PORT, NO2: $QB2_PORT)"
     echo "✓ 种子排队: 已禁用"
@@ -416,54 +606,43 @@ show_results() {
     echo "✓ 上传/下载数限制: 已取消"
     echo "✓ 活动种子数限制: 已取消"
     echo ""
-    echo "🔑 重要登录信息："
-    echo "用户名: heshui"
-    echo "密码: 1wuhongli"
+}
+
+# 交互式配置选项
+interactive_setup() {
     echo ""
-    echo "⚠️ 如果无法登录，请使用以下命令查看随机密码："
-    echo "docker logs qbittorrent-no1 | grep 'Web UI password'"
-    echo "docker logs qbittorrent-no2 | grep 'Web UI password'"
-    echo ""
-    echo "🔧 手动密码重置方法："
-    echo "./qb_manage.sh stop"
-    echo "rm -rf NO1_QB/config/qBittorrent/qBittorrent.conf"
-    echo "rm -rf NO2_QB/config/qBittorrent/qBittorrent.conf"
-    echo "./qb_manage.sh start"
-    echo ""
-    echo "快速管理命令："
-    echo "./qb_manage.sh start    # 启动容器"
-    echo "./qb_manage.sh stop     # 停止容器"
-    echo "./qb_manage.sh restart  # 重启容器"
-    echo "./qb_manage.sh logs     # 查看日志"
-    echo "./qb_manage.sh status   # 查看状态"
-    echo "./qb_manage.sh update   # 更新容器"
-    echo ""
-    echo "GitHub快速部署命令："
-    echo "curl -sSL https://raw.githubusercontent.com/heshuiiii/commad-use/main/qbittorrent_setup_2int.sh | bash"
-    echo ""
-    echo "注意事项 (HOST网络模式 + 增强配置)："
-    echo "1. 使用host网络模式，容器直接使用宿主机网络"
-    echo "2. WebUI已预设为简体中文界面"
-    echo "3. UPnP端口已随机生成，提高安全性"
-    echo "4. 所有连接数和队列限制已移除"
-    echo "5. 请确保宿主机防火墙允许相应端口访问"
-    echo "6. 配置文件已优化，无需手动调整"
-    echo ""
+    read -p "是否应用增强配置？(y/n) [默认: y]: " apply_config
+    apply_config=${apply_config:-y}
+    
+    if [[ "$apply_config" =~ ^[Yy]$ ]]; then
+        apply_enhanced_config
+        echo "✓ 增强配置已应用"
+    else
+        echo "⚠ 跳过增强配置，使用默认设置"
+    fi
 }
 
 # 主执行流程
 main() {
     check_root
+    select_qb_version
     install_docker
     install_docker_compose
     generate_random_ports
     create_directories
     create_compose_file
     set_permissions
-    start_containers
-    configure_qbittorrent
+    first_startup
+    create_password_script
+    interactive_setup
     create_management_script
     show_results
+    
+    echo ""
+    echo "🎉 部署完成！现在可以通过浏览器访问qBittorrent了"
+    echo ""
+    echo "如需查看密码，请运行: ./check_passwords.sh"
+    echo "如需管理容器，请运行: ./qb_manage.sh"
 }
 
 # 执行脚本
