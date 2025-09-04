@@ -229,9 +229,8 @@ echo ""
 echo "📋 管理命令示例:"
 for i in $(seq 1 $NUM_INSTANCES); do
     USER="heshui$i"
-    echo "   启动 $USER: systemctl start qbittorrent-$USER"
-    echo "   停止 $USER: systemctl stop qbittorrent-$USER"
-    echo "   状态 $USER: systemctl status qbittorrent-$USER"
+    echo "systemctl start qbittorrent-$USER"
+    echo "systemctl status qbittorrent-$USER"
     echo ""
 done
 
