@@ -116,7 +116,7 @@ services:
       - QB_PASSWORD=1wuhongli
     volumes:
       - ./qbittorrent_pt/NO1/config:/config
-      - ./qbittorrent_pt/NO1/downloads:/downloads
+      - ./qbittorrent_pt/NO1/downloads:/data/downloads
 
   qbittorrent-no2:
     image: nevinee/qbittorrent:${IMAGE_TAG}
@@ -132,7 +132,7 @@ services:
       - QB_PASSWORD=1wuhongli
     volumes:
       - ./qbittorrent_pt/NO2/config:/config
-      - ./qbittorrent_pt/NO2/downloads:/downloads
+      - ./qbittorrent_pt/NO2/downloads:/data/downloads
 
 EOF
 
