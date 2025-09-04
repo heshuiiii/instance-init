@@ -13,7 +13,7 @@ echo "1. 5.0.3 (推荐PT版本)"
 echo "2. latest"
 echo "3. 5.1.2"
 echo "4. 5.1.1"
-echo "5. 5.1.0"
+echo "5. 14.3.9"
 echo ""
 read -p "请选择版本号 (1-5) 或直接输入版本标签 [默认: 5.0.3]: " VERSION_CHOICE
 
