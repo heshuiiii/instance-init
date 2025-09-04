@@ -204,18 +204,19 @@ for i in $(seq 1 $NUM_INSTANCES); do
         
         echo "  ⚙️  创建服务文件: $SERVICE_FILE"
         echo "     使用qBittorrent路径: $QB_NOX_PATH"
+        echo "     使用WebUI端口: $NEW_WEBUI_PORT"
         
         cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=qBittorrent Daemon for %i
+Description=qBittorrent Daemon for $NEW_USER
 After=network.target
 
 [Service]
 Type=forking
-User=%i
-Group=%i
+User=$NEW_USER
+Group=$NEW_USER
 UMask=0002
-ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT --profile=/home/%i
+ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT --profile=/home/$NEW_USER
 TimeoutStopSec=1800
 
 [Install]
