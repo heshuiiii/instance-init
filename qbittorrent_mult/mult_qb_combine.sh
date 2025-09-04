@@ -105,11 +105,40 @@ for i in $(seq 1 $NUM_INSTANCES); do
         sudo mkdir -p "$NEW_HOME" 2>/dev/null || mkdir -p "$NEW_HOME"
     fi
     
-    echo "  📋 复制配置目录"
-    if [ "$CREATE_SERVICE" = true ]; then
-        cp -r "$BASE_HOME/." "$NEW_HOME/"
+    echo "  📋 复制配置目录 (排除下载文件)"
+    
+    # 使用rsync复制，排除Downloads目录
+    if command -v rsync >/dev/null 2>&1; then
+        echo "     📦 使用rsync复制 (高效模式)"
+        if [ "$CREATE_SERVICE" = true ]; then
+            rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/"
+        else
+            sudo rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/" 2>/dev/null || \
+                rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/"
+        fi
+        echo "     ✅ rsync复制完成，已排除Downloads目录"
     else
-        sudo cp -r "$BASE_HOME/." "$NEW_HOME/" 2>/dev/null || cp -r "$BASE_HOME/." "$NEW_HOME/"
+        # 备用方案：先复制所有，然后删除Downloads
+        echo "     📦 使用cp复制 (兼容模式，未安装rsync)"
+        if [ "$CREATE_SERVICE" = true ]; then
+            cp -r "$BASE_HOME/." "$NEW_HOME/"
+            [ -d "$NEW_HOME/qbittorrent/Downloads" ] && rm -rf "$NEW_HOME/qbittorrent/Downloads"
+        else
+            sudo cp -r "$BASE_HOME/." "$NEW_HOME/" 2>/dev/null || cp -r "$BASE_HOME/." "$NEW_HOME/"
+            if [ -d "$NEW_HOME/qbittorrent/Downloads" ]; then
+                sudo rm -rf "$NEW_HOME/qbittorrent/Downloads" 2>/dev/null || rm -rf "$NEW_HOME/qbittorrent/Downloads"
+            fi
+        fi
+        echo "     ✅ cp复制完成，已删除Downloads目录"
+    fi
+    
+    # 确保为每个实例创建独立的Downloads目录
+    DOWNLOADS_DIR="$NEW_HOME/qbittorrent/Downloads"
+    echo "     📁 创建独立下载目录: $DOWNLOADS_DIR"
+    if [ "$CREATE_SERVICE" = true ]; then
+        mkdir -p "$DOWNLOADS_DIR"
+    else
+        sudo mkdir -p "$DOWNLOADS_DIR" 2>/dev/null || mkdir -p "$DOWNLOADS_DIR"
     fi
     
     # 计算新的端口
