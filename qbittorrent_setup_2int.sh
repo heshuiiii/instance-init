@@ -108,8 +108,8 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=0
+      - PGID=0
       - TZ=Asia/Shanghai
       - WEBUI_PORT=8081
       - QB_USERNAME=heshui
@@ -124,8 +124,8 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=0
+      - PGID=0
       - TZ=Asia/Shanghai
       - WEBUI_PORT=8082
       - QB_USERNAME=heshui
