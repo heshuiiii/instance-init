@@ -81,12 +81,26 @@ if [ "$CREATE_SERVICE" = true ] && [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# 如果需要创建服务，检测qbittorrent-nox路径
+QB_NOX_PATH=""
+if [ "$CREATE_SERVICE" = true ]; then
+    QB_NOX_PATH=$(which qbittorrent-nox 2>/dev/null)
+    if [ -z "$QB_NOX_PATH" ]; then
+        echo "错误: 未找到qbittorrent-nox可执行文件"
+        echo "请确保qBittorrent已正确安装"
+        exit 1
+    fi
+fi
+
 echo "========================================="
 echo "qBittorrent多开一键配置"
 echo "========================================="
 echo "实例数量: $NUM_INSTANCES"
 echo "创建服务: $([ "$CREATE_SERVICE" = true ] && echo "是" || echo "否")"
 echo "基础配置: $BASE_CONFIG"
+if [ "$CREATE_SERVICE" = true ]; then
+    echo "qBittorrent路径: $QB_NOX_PATH"
+fi
 echo ""
 
 # 创建多个实例
@@ -189,6 +203,7 @@ for i in $(seq 1 $NUM_INSTANCES); do
         SERVICE_FILE="/etc/systemd/system/qbittorrent@$NEW_USER.service"
         
         echo "  ⚙️  创建服务文件: $SERVICE_FILE"
+        echo "     使用qBittorrent路径: $QB_NOX_PATH"
         
         cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -200,7 +215,7 @@ Type=forking
 User=%i
 Group=%i
 UMask=0002
-ExecStart=/usr/local/bin/qbittorrent-nox -d --webui-port=$NEW_WEBUI_PORT
+ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT
 TimeoutStopSec=1800
 
 [Install]
