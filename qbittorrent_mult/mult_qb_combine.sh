@@ -255,6 +255,7 @@ echo "⚠️  注意事项:"
 echo "   1. 确保防火墙允许新的端口"
 echo "   2. 各实例配置独立，互不干扰"
 echo "   3. 每个实例都有独立的下载目录"
+echo "   4. 原始Downloads目录已被排除，节省复制时间"
 if [ "$CREATE_SERVICE" = false ]; then
-    echo "   4. 建议创建对应的系统用户以提高安全性"
+    echo "   5. 建议创建对应的系统用户以提高安全性"
 fi
