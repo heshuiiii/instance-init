@@ -2,7 +2,7 @@
 tput sgr0; clear
 
 ## Load Seedbox Components
-source <(wget -qO- https://raw.githubusercontent.com/heshuiiii/Dedicated-Seedbox/refs/heads/main/Install.sh)
+source <(wget -qO- https://raw.githubusercontent.com/jerry048/Seedbox-Components/main/seedbox_installation.sh)
 # Check if Seedbox Components is successfully loaded
 if [ $? -ne 0 ]; then
 	echo "Component ~Seedbox Components~ failed to load"
@@ -36,62 +36,172 @@ BLA::stop_loading_animation
 
 ## Multi-instance qBittorrent install function
 install_multi_qb_() {
-    local username=$1
-    local password=$2
-    local qb_ver=$3
-    local lib_ver=$4
-    local cache=$5
-    
-    # Define ports and incoming ports for 4 instances
-    local ports=(8080 8081 8082 8083)
-    local incoming_ports=(45000 45001 45002 45003)
-    
-    info_2 "Installing 4 qBittorrent instances"
-    
-    for i in {0..3}; do
-        local instance_num=$((i + 1))
-        local port=${ports[$i]}
-        local incoming_port=${incoming_ports[$i]}
-        local instance_name="qbittorrent-${instance_num}"
-        
-        info_3 "Installing qBittorrent instance ${instance_num} on port ${port}"
-        
-        # Create separate directory for each instance
-        local instance_dir="/home/${username}/.config/${instance_name}"
-        mkdir -p "$instance_dir"
-        chown -R $username:$username "$instance_dir"
-        
-        # Install qBittorrent for this instance
-        BLA::start_loading_animation "${BLA_classic[@]}"
-        install_qBittorrent_ "$username" "$password" "$qb_ver" "$lib_ver" "$cache" "$port" "$incoming_port" "$instance_name" 1> /dev/null 2> /tmp/qb_error_${instance_num}
-        
-        if [ $? -ne 0 ]; then
-            BLA::stop_loading_animation
-            fail_3 "qBittorrent instance ${instance_num} installation FAILED"
-            warn "Check /tmp/qb_error_${instance_num} for details"
-        else
-            BLA::stop_loading_animation
-            info_3 "qBittorrent instance ${instance_num} installation Successful"
-            
-            # Create systemd service for this instance
-            create_qb_service "$username" "$instance_name" "$port" "$incoming_port" "$instance_dir"
-            
-            export qb_install_success_${instance_num}=1
-        fi
-    done
+local instance_num=$1
+local username=$2
+local password=$3
+local qb_ver=$4
+local lib_ver=$5
+local cache=$6
+local start_port=$7
+local start_incoming_port=$8
+
+info "Installing $instance_num qBittorrent instances"
+
+for i in $(seq 1 $instance_num); do
+	local current_port=$((start_port + i - 1))
+	local current_incoming_port=$((start_incoming_port + i - 1))
+	local instance_name="qb_${i}"
+	local instance_dir="/home/${username}/${instance_name}"
+	
+	info_2 "Installing qBittorrent instance $i (Port: $current_port)"
+	
+	# Create instance directory
+	mkdir -p "$instance_dir"
+	chown -R $username:$username "$instance_dir"
+	
+	# Install qBittorrent for this instance
+	BLA::start_loading_animation "${BLA_classic[@]}"
+	install_qBittorrent_instance "$username" "$password" "$qb_ver" "$lib_ver" "$cache" "$current_port" "$current_incoming_port" "$instance_name" "$instance_dir" 1> /dev/null 2> "/tmp/qb_${i}_error"
+	
+	if [ $? -ne 0 ]; then
+		BLA::stop_loading_animation
+		fail_3 "qBittorrent instance $i installation FAILED"
+		continue
+	else
+		BLA::stop_loading_animation
+		info_3 "qBittorrent instance $i installed successfully"
+		
+		# Create systemd service for this instance
+		create_qb_service "$username" "$instance_name" "$instance_dir" "$current_port"
+		
+		# Start and enable the service
+		systemctl enable "qbittorrent-${instance_name}.service"
+		systemctl start "qbittorrent-${instance_name}.service"
+		
+		export "qb_instance_${i}_success"=1
+	fi
+done
 }
 
-## Create systemd service for qBittorrent instance
+## Function to install individual qBittorrent instance
+install_qBittorrent_instance() {
+local username=$1
+local password=$2
+local qb_ver=$3
+local lib_ver=$4
+local cache=$5
+local port=$6
+local incoming_port=$7
+local instance_name=$8
+local instance_dir=$9
+
+# Create config directory
+mkdir -p "${instance_dir}/.config/qBittorrent"
+mkdir -p "${instance_dir}/downloads"
+mkdir -p "${instance_dir}/torrents"
+
+# Create qBittorrent config file
+cat > "${instance_dir}/.config/qBittorrent/qBittorrent.conf" << EOF
+[Application]
+FileLogger\\Enabled=true
+FileLogger\\Path=${instance_dir}/.config/qBittorrent/logs
+FileLogger\\Backup=true
+FileLogger\\DeleteOld=true
+FileLogger\\MaxSizeBytes=66560
+FileLogger\\Age=1
+FileLogger\\AgeType=1
+
+[BitTorrent]
+Session\\DefaultSavePath=${instance_dir}/downloads/
+Session\\TempPath=${instance_dir}/downloads/incomplete/
+Session\\Port=${incoming_port}
+Session\\Interface=
+Session\\InterfaceName=
+Session\\InterfaceAddress=0.0.0.0
+Session\\Encryption=0
+Session\\MaxConnections=${cache}
+Session\\MaxConnectionsPerTorrent=100
+Session\\MaxUploads=100
+Session\\MaxUploadsPerTorrent=4
+Session\\DHT=true
+Session\\PeX=true
+Session\\LSD=true
+Session\\uTPRateLimited=true
+Session\\uTP=true
+Session\\IncludeOverheadInLimits=false
+Session\\AnonymousModeEnabled=false
+Session\\QueueingSystemEnabled=false
+Session\\MaxActiveDownloads=3
+Session\\MaxActiveTorrents=5
+Session\\MaxActiveUploads=3
+Session\\IgnoreSlowTorrentsForQueueing=false
+Session\\SlowTorrentsDownloadRate=2
+Session\\SlowTorrentsUploadRate=2
+Session\\SlowTorrentsInactivityTimer=60
+Session\\BandwidthSchedulerEnabled=false
+
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+General\\Locale=zh
+Connection\\PortRangeMin=${incoming_port}
+Connection\\InterfaceName=
+Connection\\InterfaceAddress=0.0.0.0
+Connection\\UPnP=false
+Connection\\UseUPnPForWebUI=false
+Bittorrent\\DHT=true
+Bittorrent\\PeX=true
+Bittorrent\\LSD=true
+Bittorrent\\Encryption=0
+Bittorrent\\MaxConnecs=${cache}
+Bittorrent\\MaxConnecsPerTorrent=100
+Bittorrent\\MaxUploads=100
+Bittorrent\\MaxUploadsPerTorrent=4
+Downloads\\DiskWriteCacheSize=${cache}
+Downloads\\DiskWriteCacheTTL=60
+Downloads\\SavePath=${instance_dir}/downloads/
+Downloads\\TempPath=${instance_dir}/downloads/incomplete/
+Downloads\\ScanDirsV2=@Variant(\\0\\0\\0\\x1c\\0\\0\\0\\x1\\0\\0\\0\\x16\\0${instance_name}\\0torrents\\0\\0\\0\\x2\\0\\0\\0\\x1)
+WebUI\\Enabled=true
+WebUI\\Address=0.0.0.0
+WebUI\\Port=${port}
+WebUI\\Username=${username}
+WebUI\\Password_PBKDF2="@ByteArray(${password})"
+WebUI\\CSRFProtection=true
+WebUI\\ClickjackingProtection=true
+WebUI\\SecureCookie=true
+WebUI\\MaxAuthenticationFailCount=5
+WebUI\\BanDuration=3600
+WebUI\\SessionTimeout=3600
+WebUI\\AlternativeUIEnabled=false
+WebUI\\RootFolder=
+WebUI\\LocalHostAuth=false
+EOF
+
+# Set proper ownership
+chown -R $username:$username "${instance_dir}"
+chmod 755 "${instance_dir}"
+chmod 644 "${instance_dir}/.config/qBittorrent/qBittorrent.conf"
+
+# Install qBittorrent binary if not exists
+if [ ! -f "/usr/local/bin/qbittorrent-nox" ]; then
+	# This assumes the main qBittorrent installation function exists
+	# You might need to modify this based on your actual installation method
+	install_qBittorrent_ "$username" "$password" "$qb_ver" "$lib_ver" "$cache" "$port" "$incoming_port"
+fi
+}
+
+## Function to create systemd service for qBittorrent instance
 create_qb_service() {
-    local username=$1
-    local instance_name=$2
-    local port=$3
-    local incoming_port=$4
-    local config_dir=$5
-    
-    cat << EOF > /etc/systemd/system/${instance_name}.service
+local username=$1
+local instance_name=$2
+local instance_dir=$3
+local port=$4
+
+cat > "/etc/systemd/system/qbittorrent-${instance_name}.service" << EOF
 [Unit]
-Description=qBittorrent-nox ${instance_name}
+Description=qBittorrent Daemon Service ${instance_name}
 After=network.target
 
 [Service]
@@ -99,16 +209,18 @@ Type=forking
 User=${username}
 Group=${username}
 UMask=002
-ExecStart=/usr/bin/qbittorrent-nox -d --webui-port=${port} --profile=${config_dir}
+ExecStart=/usr/local/bin/qbittorrent-nox --daemon --profile=${instance_dir}
+ExecStop=/usr/bin/killall -w -s 9 qbittorrent-nox
 Restart=on-failure
+RestartSec=5
+TimeoutStopSec=infinity
+SyslogIdentifier=qbittorrent-${instance_name}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable ${instance_name}.service
-    systemctl start ${instance_name}.service
+systemctl daemon-reload
 }
 
 ## Installation environment Check
@@ -165,7 +277,7 @@ if [[ "$OS" =~ "Ubuntu" ]]; then #Ubuntu 20.04+ are supported
 fi
 
 ## Read input arguments
-while getopts "u:p:c:q:l:rbvx3mh" opt; do
+while getopts "u:p:c:q:l:n:s:rbvx3oh" opt; do
   case ${opt} in
 	u ) # process option username
 		username=${OPTARG}
@@ -178,7 +290,7 @@ while getopts "u:p:c:q:l:rbvx3mh" opt; do
 		#Check if cache is a number
 		while true
 		do
-			if ! [[ "$cache" =~ ^[0-9]+$ ]]; then
+			if ! [[ "$cache" =~ ^-?[0-9]+$ ]]; then
 				warn "Cache must be a number"
 				need_input "Please enter a cache size (in MB):"
 				read cache
@@ -201,9 +313,34 @@ while getopts "u:p:c:q:l:rbvx3mh" opt; do
 			qb_ver_choose
 		fi
 		;;
-	m ) # process option multi qBittorrent instances
-		multi_qb_install=1
+	n ) # process option number of instances
+		qb_instances=${OPTARG}
 		qb_install=1
+		#Check if instance number is valid
+		while true
+		do
+			if ! [[ "$qb_instances" =~ ^[0-9]+$ ]] || [ "$qb_instances" -lt 1 ] || [ "$qb_instances" -gt 20 ]; then
+				warn "Instance number must be between 1 and 20"
+				need_input "Please enter number of qBittorrent instances (1-20):"
+				read qb_instances
+			else
+				break
+			fi
+		done
+		;;
+	s ) # process option starting port
+		start_port=${OPTARG}
+		#Check if port is valid
+		while true
+		do
+			if ! [[ "$start_port" =~ ^[0-9]+$ ]] || [ "$start_port" -lt 1024 ] || [ "$start_port" -gt 65000 ]; then
+				warn "Starting port must be between 1024 and 65000"
+				need_input "Please enter starting port (1024-65000):"
+				read start_port
+			else
+				break
+			fi
+		done
 		;;
 	r ) # process option autoremove
 		autoremove_install=1
@@ -222,16 +359,74 @@ while getopts "u:p:c:q:l:rbvx3mh" opt; do
 		unset bbrx_install
 		bbrv3_install=1
 		;;
+	o ) # process option port
+		if [[ -n "$qb_install" ]]; then
+			if [ -z "$qb_instances" ] || [ "$qb_instances" -eq 1 ]; then
+				need_input "Please enter qBittorrent port:"
+				read qb_port
+				while true
+				do
+					if ! [[ "$qb_port" =~ ^[0-9]+$ ]]; then
+						warn "Port must be a number"
+						need_input "Please enter qBittorrent port:"
+						read qb_port
+					else
+						break
+					fi
+				done
+			fi
+			need_input "Please enter qBittorrent incoming port:"
+			read qb_incoming_port
+			while true
+			do
+				if ! [[ "$qb_incoming_port" =~ ^[0-9]+$ ]]; then
+						warn "Port must be a number"
+						need_input "Please enter qBittorrent incoming port:"
+						read qb_incoming_port
+				else
+					break
+				fi
+			done
+		fi
+		if [[ -n "$autobrr_install" ]]; then
+			need_input "Please enter autobrr port:"
+			read autobrr_port
+			while true
+			do
+				if ! [[ "$autobrr_port" =~ ^[0-9]+$ ]]; then
+					warn "Port must be a number"
+					need_input "Please enter autobrr port:"
+					read autobrr_port
+				else
+					break
+				fi
+			done
+		fi
+		if [[ -n "$vertex_install" ]]; then
+			need_input "Please enter vertex port:"
+			read vertex_port
+			while true
+			do
+				if ! [[ "$vertex_port" =~ ^[0-9]+$ ]]; then
+					warn "Port must be a number"
+					need_input "Please enter vertex port:"
+					read vertex_port
+				else
+					break
+				fi
+			done
+		fi
+		;;
 	h ) # process option help
 		info "Help:"
-		info "Usage: ./Install.sh -u <username> -p <password> -c <Cache Size(unit:MiB)> -q <qBittorrent version> -l <libtorrent version> -m -b -v -r -3 -x"
-		info "Example: ./Install.sh -u jerry048 -p 1LDw39VOgors -c 3072 -q 4.3.9 -l v1.2.19 -m -b -v -r -3"
+		info "Usage: ./Install.sh -u <username> -p <password> -c <Cache Size(unit:MiB)> -q <qBittorrent version> -l <libtorrent version> -n <number of instances> -s <starting port> -b -v -r -3 -x -p"
+		info "Example: ./Install.sh -u jerry048 -p 1LDw39VOgors -c 3072 -q 4.3.9 -l v1.2.19 -n 3 -s 8080 -b -v -r -3"
 		source <(wget -qO- https://raw.githubusercontent.com/jerry048/Seedbox-Components/main/Torrent%20Clients/qBittorrent/qBittorrent_install.sh)
 		seperator
 		info "Options:"
 		need_input "1. -u : Username"
 		need_input "2. -p : Password"
-		need_input "3. -c : Cache Size for qBittorrent (unit:MiB)"
+		# need_input "3. -c : Cache Size for qBittorrent (unit:MiB)"
 		echo -e "\n"
 		need_input "4. -q : qBittorrent version"
 		need_input "Available qBittorrent versions:"
@@ -241,19 +436,21 @@ while getopts "u:p:c:q:l:rbvx3mh" opt; do
 		need_input "Available libtorrent versions:"
 		tput sgr0; tput setaf 7; tput dim; history -p "${lib_ver_list[@]}"; tput sgr0
 		echo -e "\n"
-		need_input "6. -m : Install 4 qBittorrent instances (ports: 8080,8081,8082,8083)"
-		need_input "7. -r : Install autoremove-torrents"
-		need_input "8. -b : Install autobrr"
-		need_input "9. -v : Install vertex"
-		need_input "10. -x : Install BBRx"
-		need_input "11. -3 : Install BBRv3"
-		need_input "12. -h : Display help message"
+		need_input "6. -n : Number of qBittorrent instances (1-20)"
+		need_input "7. -s : Starting port for qBittorrent instances"
+		need_input "8. -r : Install autoremove-torrents"
+		need_input "9. -b : Install autobrr"
+		need_input "10. -v : Install vertex"
+		need_input "11. -x : Install BBRx"
+		need_input "12. -3 : Install BBRv3"
+		need_input "13. -o : Specify ports for qBittorrent, autobrr and vertex"
+		need_input "14. -h : Display help message"
 		exit 0
 		;;
 	\? ) 
 		info "Help:"
-		info_2 "Usage: ./Install.sh -u <username> -p <password> -c <Cache Size(unit:MiB)> -q <qBittorrent version> -l <libtorrent version> -m -b -v -r -3 -x"
-		info_2 "Example ./Install.sh -u jerry048 -p 1LDw39VOgors -c 3072 -q 4.3.9 -l v1.2.19 -m -b -v -r -3"
+		info_2 "Usage: ./Install.sh -u <username> -p <password> -c <Cache Size(unit:MiB)> -q <qBittorrent version> -l <libtorrent version> -n <number of instances> -s <starting port> -b -v -r -3 -x -o"
+		info_2 "Example ./Install.sh -u jerry048 -p 1LDw39VOgors -c 3072 -q 4.3.9 -l v1.2.19 -n 3 -s 8080 -b -v -r -3"
 		exit 1
 		;;
 	esac
@@ -307,7 +504,7 @@ if [[ ! -z "$qb_install" ]]; then
 		#Check if cache is a number
 		while true
 		do
-			if ! [[ "$cache" =~ ^[0-9]+$ ]]; then
+			if ! [[ "$cache" =~ ^-?[0-9]+$ ]]; then
 				warn "Cache must be a number"
 				need_input "Please enter a cache size (in MB):"
 				read cache
@@ -316,6 +513,15 @@ if [[ ! -z "$qb_install" ]]; then
 			fi
 		done
 		qb_cache=$cache
+	fi
+	#Check if number of instances is specified
+	if [ -z "$qb_instances" ]; then
+		warn "Number of instances is not specified, defaulting to 1"
+		qb_instances=1
+	fi
+	#Check if starting port is specified
+	if [ -z "$start_port" ]; then
+		start_port=8080
 	fi
 	#Check if qBittorrent version is specified
 	if [ -z "$qb_ver" ]; then
@@ -327,36 +533,26 @@ if [[ ! -z "$qb_install" ]]; then
 		warn "libtorrent version is not specified"
 		lib_ver_check
 	fi
+	#Check if qBittorrent incoming port is specified
+	if [ -z "$qb_incoming_port" ]; then
+		qb_incoming_port=45000
+	fi
 
 	## qBittorrent & libtorrent compatibility check
 	qb_install_check
 
-	## Install qBittorrent (single or multiple instances)
-	if [[ ! -z "$multi_qb_install" ]]; then
-		# Install multiple qBittorrent instances
-		install_multi_qb_ "$username" "$password" "$qb_ver" "$lib_ver" "$qb_cache"
-	else
-		# Install single qBittorrent instance
-		qb_port=${qb_port:-8080}
-		qb_incoming_port=${qb_incoming_port:-45000}
-		install_ "install_qBittorrent_ $username $password $qb_ver $lib_ver $qb_cache $qb_port $qb_incoming_port" "Installing qBittorrent" "/tmp/qb_error" qb_install_success
-	fi
+	## Multi-instance qBittorrent install
+	install_multi_qb_ "$qb_instances" "$username" "$password" "$qb_ver" "$lib_ver" "$qb_cache" "$start_port" "$qb_incoming_port"
 fi
 
 # autobrr Install
 if [[ ! -z "$autobrr_install" ]]; then
-	if [ -z "$autobrr_port" ]; then
-		autobrr_port=7474
-	fi
-	install_ "install_autobrr_ $autobrr_port" "Installing autobrr" "/tmp/autobrr_error" autobrr_install_success
+	install_ install_autobrr_ "Installing autobrr" "/tmp/autobrr_error" autobrr_install_success
 fi
 
 # vertex Install
 if [[ ! -z "$vertex_install" ]]; then
-	if [ -z "$vertex_port" ]; then
-		vertex_port=8081
-	fi
-	install_ "install_vertex_ $vertex_port" "Installing vertex" "/tmp/vertex_error" vertex_install_success
+	install_ install_vertex_ "Installing vertex" "/tmp/vertex_error" vertex_install_success
 fi
 
 # autoremove-torrents Install
@@ -388,7 +584,7 @@ install_ kernel_settings_ "Setting Kernel Settings" "/tmp/kernel_settings_error"
 if [[ ! -z "$bbrx_install" ]]; then
 	# Check if Tweaked BBR is already installed
 	if [[ ! -z "$(lsmod | grep bbrx)" ]]; then
-		warn "Tweaked BBR is already installed"
+		warn echo "Tweaked BBR is already installed"
 	else
 		install_ install_bbrx_ "Installing BBRx" "/tmp/bbrx_error" bbrx_install_success
 	fi
@@ -399,8 +595,8 @@ if [[ ! -z "$bbrv3_install" ]]; then
 	install_ install_bbrv3_ "Installing BBRv3" "/tmp/bbrv3_error" bbrv3_install_success
 fi
 
-## Configue Boot Script
-info "Start Configuing Boot Script"
+## Configure Boot Script
+info "Start Configuring Boot Script"
 touch /root/.boot-script.sh && chmod +x /root/.boot-script.sh
 cat << EOF > /root/.boot-script.sh
 #!/bin/bash
@@ -420,6 +616,11 @@ else
 	set_ring_buffer_
 fi
 set_initial_congestion_window_
+
+# Start all qBittorrent instances
+for service in \$(systemctl list-unit-files | grep "qbittorrent-qb_" | awk '{print \$1}'); do
+	systemctl start "\$service"
+done
 EOF
 
 # Configure the script to run during system startup
@@ -445,23 +646,25 @@ info "Seedbox Installation Complete"
 publicip=$(curl -s https://ipinfo.io/ip)
 
 # Display Username and Password
-# qBittorrent
-if [[ ! -z "$multi_qb_install" ]]; then
-	info "4 qBittorrent instances installed"
-	for i in {1..4}; do
-		local port=$((8079 + i))  # 8080, 8081, 8082, 8083
-		if [[ ! -z "$(eval echo \$qb_install_success_${i})" ]]; then
-			boring_text "qBittorrent Instance ${i} WebUI: http://$publicip:$port"
+# qBittorrent instances
+if [[ ! -z "$qb_install" ]] && [[ ! -z "$qb_instances" ]]; then
+	info "qBittorrent instances installed: $qb_instances"
+	for i in $(seq 1 $qb_instances); do
+		local current_port=$((start_port + i - 1))
+		if [[ ! -z $(eval echo \$qb_instance_${i}_success) ]]; then
+			boring_text "qBittorrent Instance $i WebUI: http://$publicip:$current_port"
+			boring_text "qBittorrent Instance $i Directory: /home/$username/qb_$i"
 		fi
 	done
 	boring_text "qBittorrent Username: $username"
 	boring_text "qBittorrent Password: $password"
 	echo -e "\n"
-elif [[ ! -z "$qb_install_success" ]]; then
-	info "qBittorrent installed"
-	boring_text "qBittorrent WebUI: http://$publicip:${qb_port:-8080}"
-	boring_text "qBittorrent Username: $username"
-	boring_text "qBittorrent Password: $password"
+	
+	info "Service Management Commands:"
+	boring_text "Check all instances status: systemctl status qbittorrent-qb_*"
+	boring_text "Start all instances: systemctl start qbittorrent-qb_*"
+	boring_text "Stop all instances: systemctl stop qbittorrent-qb_*"
+	boring_text "Restart all instances: systemctl restart qbittorrent-qb_*"
 	echo -e "\n"
 fi
 
@@ -476,14 +679,14 @@ fi
 # autobrr
 if [[ ! -z "$autobrr_install_success" ]]; then
 	info "autobrr installed"
-	boring_text "autobrr WebUI: http://$publicip:${autobrr_port:-7474}"
+	boring_text "autobrr WebUI: http://$publicip:$autobrr_port"
 	echo -e "\n"
 fi
 
 # vertex
 if [[ ! -z "$vertex_install_success" ]]; then
 	info "vertex installed"
-	boring_text "vertex WebUI: http://$publicip:${vertex_port:-8081}"
+	boring_text "vertex WebUI: http://$publicip:$vertex_port"
 	boring_text "vertex Username: $username"
 	boring_text "vertex Password: $password"
 	echo -e "\n"
@@ -496,14 +699,6 @@ fi
 
 if [[ ! -z "$bbrv3_install_success" ]]; then
 	info "BBRv3 successfully installed, please reboot for it to take effect"
-fi
-
-# Service management instructions
-if [[ ! -z "$multi_qb_install" ]]; then
-	info "qBittorrent Service Management:"
-	boring_text "Start all instances: systemctl start qbittorrent-{1..4}"
-	boring_text "Stop all instances: systemctl stop qbittorrent-{1..4}"
-	boring_text "Check status: systemctl status qbittorrent-{1..4}"
 fi
 
 exit 0
