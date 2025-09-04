@@ -1,27 +1,22 @@
 #!/bin/bash
 
-# qBittorrent多开一键配置脚本
-# 使用方法: ./qb_multi_setup.sh [数量] [选项]
+# qBittorrent多开简化配置脚本
+# 使用方法: ./qb_multi_setup.sh [数量]
 
 # 显示帮助信息
 show_help() {
     cat << EOF
-qBittorrent多开一键配置脚本
+qBittorrent多开配置脚本
 
 使用方法:
-    $0 <实例数量> [选项]
+    $0 <实例数量>
 
 参数:
     实例数量        需要创建的qBittorrent实例数量
 
-选项:
-    -s, --service   同时创建systemd服务
-    -h, --help      显示此帮助信息
-
 示例:
-    $0 2            # 仅创建2个实例配置
-    $0 3 -s         # 创建3个实例并配置systemd服务
-    $0 2 --service  # 创建2个实例并配置systemd服务
+    $0 2            # 创建2个实例配置 (heshui1, heshui2)
+    $0 3            # 创建3个实例配置 (heshui1, heshui2, heshui3)
 
 EOF
 }
@@ -33,23 +28,6 @@ if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
 fi
 
 NUM_INSTANCES=$1
-CREATE_SERVICE=false
-
-# 解析选项
-shift
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -s|--service)
-            CREATE_SERVICE=true
-            shift
-            ;;
-        *)
-            echo "未知选项: $1"
-            show_help
-            exit 1
-            ;;
-    esac
-done
 
 # 检查输入是否为正整数
 if ! [[ "$NUM_INSTANCES" =~ ^[0-9]+$ ]] || [ "$NUM_INSTANCES" -lt 1 ]; then
@@ -75,32 +53,26 @@ if [ ! -f "$BASE_CONFIG/qBittorrent.conf" ]; then
     exit 1
 fi
 
-# 检查是否有root权限（如果需要创建服务）
-if [ "$CREATE_SERVICE" = true ] && [ "$EUID" -ne 0 ]; then
-    echo "错误: 创建系统服务需要root权限，请使用sudo运行"
+# 检查是否有root权限
+if [ "$EUID" -ne 0 ]; then
+    echo "错误: 需要root权限，请使用sudo运行"
     exit 1
 fi
 
-# 如果需要创建服务，检测qbittorrent-nox路径
-QB_NOX_PATH=""
-if [ "$CREATE_SERVICE" = true ]; then
-    QB_NOX_PATH=$(which qbittorrent-nox 2>/dev/null)
-    if [ -z "$QB_NOX_PATH" ]; then
-        echo "错误: 未找到qbittorrent-nox可执行文件"
-        echo "请确保qBittorrent已正确安装"
-        exit 1
-    fi
+# 检测qbittorrent-nox路径
+QB_NOX_PATH=$(which qbittorrent-nox 2>/dev/null)
+if [ -z "$QB_NOX_PATH" ]; then
+    echo "错误: 未找到qbittorrent-nox可执行文件"
+    echo "请确保qBittorrent已正确安装"
+    exit 1
 fi
 
 echo "========================================="
-echo "qBittorrent多开一键配置"
+echo "qBittorrent多开配置"
 echo "========================================="
 echo "实例数量: $NUM_INSTANCES"
-echo "创建服务: $([ "$CREATE_SERVICE" = true ] && echo "是" || echo "否")"
 echo "基础配置: $BASE_CONFIG"
-if [ "$CREATE_SERVICE" = true ]; then
-    echo "qBittorrent路径: $QB_NOX_PATH"
-fi
+echo "qBittorrent路径: $QB_NOX_PATH"
 echo ""
 
 # 创建多个实例
@@ -111,49 +83,29 @@ for i in $(seq 1 $NUM_INSTANCES); do
     
     echo "━━━ 创建实例 $i: $NEW_USER ━━━"
     
-    # 创建新的用户目录结构
+    # 创建目录结构
     echo "  📁 创建目录: $NEW_HOME"
-    if [ "$CREATE_SERVICE" = true ]; then
-        mkdir -p "$NEW_HOME"
-    else
-        sudo mkdir -p "$NEW_HOME" 2>/dev/null || mkdir -p "$NEW_HOME"
-    fi
+    mkdir -p "$NEW_HOME"
     
     echo "  📋 复制配置目录 (排除下载文件)"
     
     # 使用rsync复制，排除Downloads目录
     if command -v rsync >/dev/null 2>&1; then
         echo "     📦 使用rsync复制 (高效模式)"
-        if [ "$CREATE_SERVICE" = true ]; then
-            rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/"
-        else
-            sudo rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/" 2>/dev/null || \
-                rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/"
-        fi
+        rsync -av --exclude='qbittorrent/Downloads/' --exclude='qbittorrent/Downloads' "$BASE_HOME/" "$NEW_HOME/"
         echo "     ✅ rsync复制完成，已排除Downloads目录"
     else
         # 备用方案：先复制所有，然后删除Downloads
-        echo "     📦 使用cp复制 (兼容模式，未安装rsync)"
-        if [ "$CREATE_SERVICE" = true ]; then
-            cp -r "$BASE_HOME/." "$NEW_HOME/"
-            [ -d "$NEW_HOME/qbittorrent/Downloads" ] && rm -rf "$NEW_HOME/qbittorrent/Downloads"
-        else
-            sudo cp -r "$BASE_HOME/." "$NEW_HOME/" 2>/dev/null || cp -r "$BASE_HOME/." "$NEW_HOME/"
-            if [ -d "$NEW_HOME/qbittorrent/Downloads" ]; then
-                sudo rm -rf "$NEW_HOME/qbittorrent/Downloads" 2>/dev/null || rm -rf "$NEW_HOME/qbittorrent/Downloads"
-            fi
-        fi
+        echo "     📦 使用cp复制 (兼容模式)"
+        cp -r "$BASE_HOME/." "$NEW_HOME/"
+        [ -d "$NEW_HOME/qbittorrent/Downloads" ] && rm -rf "$NEW_HOME/qbittorrent/Downloads"
         echo "     ✅ cp复制完成，已删除Downloads目录"
     fi
     
     # 确保为每个实例创建独立的Downloads目录
     DOWNLOADS_DIR="$NEW_HOME/qbittorrent/Downloads"
     echo "     📁 创建独立下载目录: $DOWNLOADS_DIR"
-    if [ "$CREATE_SERVICE" = true ]; then
-        mkdir -p "$DOWNLOADS_DIR"
-    else
-        sudo mkdir -p "$DOWNLOADS_DIR" 2>/dev/null || mkdir -p "$DOWNLOADS_DIR"
-    fi
+    mkdir -p "$DOWNLOADS_DIR"
     
     # 计算新的端口
     NEW_WEBUI_PORT=$((8080 + i))
@@ -168,53 +120,30 @@ for i in $(seq 1 $NUM_INSTANCES); do
     
     if [ -f "$CONFIG_FILE" ]; then
         # 使用sed修改端口配置
-        if [ "$CREATE_SERVICE" = true ]; then
-            sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
-            sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_PORT_MIN/" "$CONFIG_FILE"
-            sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
-        else
-            sudo sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE" 2>/dev/null || {
-                sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
-                sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_PORT_MIN/" "$CONFIG_FILE"
-                sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
-            }
-        fi
+        sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
+        sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_PORT_MIN/" "$CONFIG_FILE"
+        sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
         echo "     ✅ 配置文件已更新"
     else
         echo "     ⚠️  警告: 配置文件不存在: $CONFIG_FILE"
     fi
     
-    # 如果需要创建服务
-    if [ "$CREATE_SERVICE" = true ]; then
-        echo "  👤 创建系统用户: $NEW_USER"
-        # 创建系统用户（如果不存在）
-        if ! id "$NEW_USER" &>/dev/null; then
-            useradd -r -s /bin/false -d "$NEW_HOME" "$NEW_USER"
-            echo "     ✅ 系统用户创建成功"
-        else
-            echo "     ℹ️  用户已存在，跳过创建"
-        fi
-        
-        # 设置目录权限
-        echo "  🔐 设置目录权限"
-        chown -R "$NEW_USER:$NEW_USER" "$NEW_HOME"
-        
-        # 创建systemd服务文件
-        SERVICE_FILE="/etc/systemd/system/qbittorrent@$NEW_USER.service"
-        
-        echo "  ⚙️  创建服务文件: $SERVICE_FILE"
-        echo "     使用qBittorrent路径: $QB_NOX_PATH"
-        echo "     使用WebUI端口: $NEW_WEBUI_PORT"
-        
-        cat > "$SERVICE_FILE" << EOF
+    # 创建systemd服务文件
+    SERVICE_FILE="/etc/systemd/system/qbittorrent-$NEW_USER.service"
+    
+    echo "  ⚙️  创建服务文件: $SERVICE_FILE"
+    echo "     WebUI端口: $NEW_WEBUI_PORT"
+    echo "     配置目录: /home/$NEW_USER"
+    
+    cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=qBittorrent Daemon for $NEW_USER
 After=network.target
 
 [Service]
 Type=forking
-User=$NEW_USER
-Group=$NEW_USER
+User=root
+Group=root
 UMask=0002
 ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT --profile=/home/$NEW_USER
 TimeoutStopSec=1800
@@ -223,24 +152,9 @@ TimeoutStopSec=1800
 WantedBy=multi-user.target
 EOF
 
-        echo "  🔄 重新加载systemd配置"
-        systemctl daemon-reload
-        
-        echo "  ✅ 启用服务"
-        systemctl enable "qbittorrent@$NEW_USER"
-        
-    else
-        # 设置正确的权限（非服务模式）
-        echo "  🔐 设置目录权限"
-        if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R "$NEW_USER:$NEW_USER" "$NEW_HOME" 2>/dev/null || {
-                echo "     ⚠️  警告: 无法设置用户权限，可能需要先创建用户 $NEW_USER"
-                sudo chown -R $(whoami):$(whoami) "$NEW_HOME" 2>/dev/null || chown -R $(whoami):$(whoami) "$NEW_HOME"
-            }
-        else
-            echo "     ⚠️  警告: 无sudo权限，使用当前用户权限"
-        fi
-    fi
+    echo "  🔄 启用服务"
+    systemctl daemon-reload
+    systemctl enable "qbittorrent-$NEW_USER"
     
     echo "  ✅ 实例 $NEW_USER 配置完成"
     echo ""
@@ -259,48 +173,34 @@ for i in $(seq 1 $NUM_INSTANCES); do
 done
 
 echo ""
-if [ "$CREATE_SERVICE" = true ]; then
-    echo "🚀 服务管理命令:"
-    echo "   原始实例: systemctl start qbittorrent@heshui"
-    for i in $(seq 1 $NUM_INSTANCES); do
-        echo "   实例 $i: systemctl start qbittorrent@heshui$i"
-    done
-    
+echo "🚀 服务管理命令:"
+echo "   原始实例: systemctl start qbittorrent@heshui"
+for i in $(seq 1 $NUM_INSTANCES); do
+    echo "   实例 $i: systemctl start qbittorrent-heshui$i"
+done
+
+echo ""
+echo "🌐 Web界面访问:"
+echo "   原始实例: http://your-server-ip:8080"
+for i in $(seq 1 $NUM_INSTANCES); do
+    NEW_WEBUI_PORT=$((8080 + i))
+    echo "   实例 $i: http://your-server-ip:$NEW_WEBUI_PORT"
+done
+
+echo ""
+echo "📋 管理命令示例:"
+for i in $(seq 1 $NUM_INSTANCES); do
+    USER="heshui$i"
+    echo "   启动 $USER: systemctl start qbittorrent-$USER"
+    echo "   停止 $USER: systemctl stop qbittorrent-$USER"
+    echo "   状态 $USER: systemctl status qbittorrent-$USER"
     echo ""
-    echo "🌐 Web界面访问:"
-    echo "   原始实例: http://your-server-ip:8080"
-    for i in $(seq 1 $NUM_INSTANCES); do
-        NEW_WEBUI_PORT=$((8080 + i))
-        echo "   实例 $i: http://your-server-ip:$NEW_WEBUI_PORT"
-    done
-    
-    echo ""
-    echo "📋 管理命令示例:"
-    for i in $(seq 1 $NUM_INSTANCES); do
-        USER="heshui$i"
-        echo "   启动 $USER: systemctl start qbittorrent@$USER"
-        echo "   停止 $USER: systemctl stop qbittorrent@$USER"
-        echo "   状态 $USER: systemctl status qbittorrent@$USER"
-        echo ""
-    done
-else
-    echo "🚀 手动启动命令:"
-    echo "   原始实例: qbittorrent-nox -d --webui-port=8080"
-    for i in $(seq 1 $NUM_INSTANCES); do
-        NEW_WEBUI_PORT=$((8080 + i))
-        echo "   实例 $i: sudo -u heshui$i qbittorrent-nox -d --webui-port=$NEW_WEBUI_PORT"
-    done
-    
-    echo ""
-    echo "💡 提示: 使用 -s 或 --service 选项可以自动创建systemd服务"
-fi
+done
 
 echo ""
 echo "⚠️  注意事项:"
 echo "   1. 确保防火墙允许新的端口"
 echo "   2. 各实例配置独立，互不干扰"
 echo "   3. 每个实例都有独立的下载目录"
-echo "   4. 原始Downloads目录已被排除，节省复制时间"
-if [ "$CREATE_SERVICE" = false ]; then
-    echo "   5. 建议创建对应的系统用户以提高安全性"
-fi
+echo "   4. 服务以root身份运行，但使用独立的配置目录"
+echo "   5. 原始Downloads目录已被排除，节省复制时间"
