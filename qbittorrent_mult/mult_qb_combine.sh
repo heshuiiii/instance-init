@@ -215,7 +215,7 @@ Type=forking
 User=%i
 Group=%i
 UMask=0002
-ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT
+ExecStart=$QB_NOX_PATH -d --webui-port=$NEW_WEBUI_PORT --profile=/home/%i
 TimeoutStopSec=1800
 
 [Install]
