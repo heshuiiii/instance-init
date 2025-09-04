@@ -670,35 +670,35 @@ fi
 
 # autoremove-torrents
 if [[ ! -z "$autoremove_install_success" ]]; then
-	info "autoremove-torrents installed"
-	boring_text "Config at /home/$username/.config.yml"
-	boring_text "Please read https://autoremove-torrents.readthedocs.io/en/latest/config.html for configuration"
-	echo -e "\n"
+	echo "autoremove-torrents installed"
+	echo "Config at /home/$username/.config.yml"
+	echo "Please read https://autoremove-torrents.readthedocs.io/en/latest/config.html for configuration"
+	echo ""
 fi
 
 # autobrr
 if [[ ! -z "$autobrr_install_success" ]]; then
-	info "autobrr installed"
-	boring_text "autobrr WebUI: http://$publicip:$autobrr_port"
-	echo -e "\n"
+	echo "autobrr installed"
+	echo "autobrr WebUI: http://$publicip:$autobrr_port"
+	echo ""
 fi
 
 # vertex
 if [[ ! -z "$vertex_install_success" ]]; then
-	info "vertex installed"
-	boring_text "vertex WebUI: http://$publicip:$vertex_port"
-	boring_text "vertex Username: $username"
-	boring_text "vertex Password: $password"
-	echo -e "\n"
+	echo "vertex installed"
+	echo "vertex WebUI: http://$publicip:$vertex_port"
+	echo "vertex Username: $username"
+	echo "vertex Password: $password"
+	echo ""
 fi
 
 # BBR
 if [[ ! -z "$bbrx_install_success" ]]; then
-	info "BBRx successfully installed, please reboot for it to take effect"
+	echo "BBRx successfully installed, please reboot for it to take effect"
 fi
 
 if [[ ! -z "$bbrv3_install_success" ]]; then
-	info "BBRv3 successfully installed, please reboot for it to take effect"
+	echo "BBRv3 successfully installed, please reboot for it to take effect"
 fi
 
 exit 0
