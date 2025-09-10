@@ -318,6 +318,7 @@ ExecStartPre=-/bin/umount /home/mnt/Rclone
 ExecStart=/usr/bin/rclone mount openlist:/ /home/mnt/Rclone \
   --config=/root/.config/rclone/rclone.conf \
   --allow-other \
+  --allow-non-empty \
   --dir-cache-time 5m \
   --vfs-cache-mode full \
   --vfs-cache-max-size 10G \
