@@ -8,6 +8,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/heshuiiii/Dedicated-Seedbox/r
 wget -O mult_qb_enhanced.sh "https://raw.githubusercontent.com/heshuiiii/commad-use/refs/heads/main/qbittorrent_mult/mult_qb_enhanced.sh" && bash mult_qb_enhanced.sh
 ```
 
+## 初始化服务器
 ```
 wget -O init_debian_with_rclone.sh "https://raw.githubusercontent.com/heshuiiii/commad-use/refs/heads/main/init_debian_with_rclone.sh" && bash init_debian_with_rclone.sh
 ```
