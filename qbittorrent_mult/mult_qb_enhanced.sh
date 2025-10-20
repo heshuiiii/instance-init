@@ -460,4 +460,46 @@ if [ ${#CREATED_USERS[@]} -gt 0 ]; then
         IFS='|' read -r username webui conn session <<< "$assignment"
         echo "   $username: http://$HOST_IP:$webui"
     done
+    
+    echo ""
+    info "🎯 一键管理命令:"
+    echo ""
+    echo "   启动所有实例:"
+    if [ ${#CREATED_SERVICES[@]} -gt 0 ]; then
+        START_CMD="systemctl start"
+        for service in "${CREATED_SERVICES[@]}"; do
+            START_CMD="$START_CMD $service"
+        done
+        echo "   $START_CMD"
+    fi
+    
+    echo ""
+    echo "   停止所有实例:"
+    if [ ${#CREATED_SERVICES[@]} -gt 0 ]; then
+        STOP_CMD="systemctl stop"
+        for service in "${CREATED_SERVICES[@]}"; do
+            STOP_CMD="$STOP_CMD $service"
+        done
+        echo "   $STOP_CMD"
+    fi
+    
+    echo ""
+    echo "   重启所有实例:"
+    if [ ${#CREATED_SERVICES[@]} -gt 0 ]; then
+        RESTART_CMD="systemctl restart"
+        for service in "${CREATED_SERVICES[@]}"; do
+            RESTART_CMD="$RESTART_CMD $service"
+        done
+        echo "   $RESTART_CMD"
+    fi
+    
+    echo ""
+    echo "   查看所有实例状态:"
+    if [ ${#CREATED_SERVICES[@]} -gt 0 ]; then
+        STATUS_CMD="systemctl status"
+        for service in "${CREATED_SERVICES[@]}"; do
+            STATUS_CMD="$STATUS_CMD $service"
+        done
+        echo "   $STATUS_CMD"
+    fi
 fi
