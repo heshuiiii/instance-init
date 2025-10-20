@@ -333,15 +333,29 @@ for i in $(seq 1 $NUM_INSTANCES); do
     info "WebUI端口: $NEW_WEBUI_PORT"
     info "连接端口: $NEW_CONNECTION_PORT"
     
-    # 修改配置文件中的端口
+    # 修改配置文件中的端口（修复版）
     CONFIG_FILE="$NEW_CONFIG/qBittorrent.conf"
     
     if [ -f "$CONFIG_FILE" ]; then
+        # 计算 Session\Port（在原基础上递增，避免冲突）
+        # 假设基础端口是 60244，每个实例递增1
+        BASE_SESSION_PORT=60244
+        NEW_SESSION_PORT=$((BASE_SESSION_PORT + i - 1))
+        
         # 使用sed修改端口配置
         sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
         sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_CONNECTION_PORT/" "$CONFIG_FILE"
+        
+        # 关键修复：修改 Session\Port（BitTorrent监听端口）
+        sed -i "s/^Session\\\\Port=.*/Session\\\\Port=$NEW_SESSION_PORT/" "$CONFIG_FILE"
+        
+        # 替换路径中的用户名
         sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
+        
         success "配置文件已更新"
+        info "  WebUI端口: $NEW_WEBUI_PORT"
+        info "  连接端口: $NEW_CONNECTION_PORT"
+        info "  Session端口: $NEW_SESSION_PORT"
     else
         warn "配置文件不存在: $CONFIG_FILE"
     fi
