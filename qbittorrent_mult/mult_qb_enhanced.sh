@@ -356,7 +356,7 @@ for i in $(seq 1 $NUM_INSTANCES); do
     # 计算新的端口
     NEW_WEBUI_PORT=$((START_PORT + i - 1))
     NEW_CONNECTION_PORT=$((45000 + START_PORT + i - 1))
-    NEW_SESSION_PORT=$((BASE_SESSION_PORT + (i - 1) * 2))  # 基础端口 + (实例序号-1)*2
+    NEW_SESSION_PORT=$((BASE_SESSION_PORT + i * 2))
     
     info "端口配置:"
     info "  WebUI端口: $NEW_WEBUI_PORT"
