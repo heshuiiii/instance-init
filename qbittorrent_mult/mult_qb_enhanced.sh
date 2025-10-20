@@ -1,7 +1,6 @@
 #!/bin/bash
-# 先执行 bash <(wget -qO- https://raw.githubusercontent.com/heshuiiii/Dedicated-Seedbox/refs/heads/main/Install.sh) -u 用户名 -p 密码 -c -1 -q 4.3.9 -l v1.2.20  
-# qBittorrent多开简化配置脚本 - 自定义版
-# 使用方法: ./qb_multi_setup_custom.sh [数量] [起始端口] [用户名前缀]
+# qBittorrent多开简化配置脚本 - 增强版
+# 动态读取 Session\Port 并递增配置
 
 # 颜色定义
 RED='\033[0;31m'
@@ -20,7 +19,7 @@ need_input() { echo -e "${YELLOW}[INPUT]${NC} $1"; }
 # 显示帮助信息
 show_help() {
     cat << EOF
-qBittorrent多开配置脚本 - 自定义版
+qBittorrent多开配置脚本 - 增强版
 
 使用方法:
     $0 <实例数量> [起始端口] [用户名前缀]
@@ -34,16 +33,16 @@ qBittorrent多开配置脚本 - 自定义版
     $0 3                          # 创建3个实例，端口8081-8083，用户heshui1-3
     $0 2 8033                     # 创建2个实例，端口8033-8034，用户heshui1-2
     $0 3 9000 qbuser             # 创建3个实例，端口9000-9002，用户qbuser1-3
-    $0 2 8033 heshui123          # 创建2个实例，端口8033-8034，用户heshui1231-1232
 
 交互模式:
     $0                            # 进入交互模式，逐步输入参数
 
 功能:
-    - 支持自定义起始端口和用户名前缀
+    - 自动读取基础配置的 Session\Port 端口
+    - 每个新实例 Session\Port 在基础上 +2 递增
     - 创建真正的系统用户
     - 独立的配置目录和下载目录
-    - 自动端口分配（WebUI和连接端口）
+    - 自动端口分配（WebUI、Connection、Session三组端口）
     - systemd服务配置
 
 EOF
@@ -56,6 +55,22 @@ check_port() {
         return 1  # 端口被占用
     fi
     return 0  # 端口可用
+}
+
+# 读取基础配置中的 Session\Port
+read_base_session_port() {
+    local config_file=$1
+    local port
+    
+    # 使用 grep 和 sed 提取 Session\Port 的值
+    port=$(grep "^Session\\\\Port=" "$config_file" | sed 's/Session\\Port=//')
+    
+    if [ -z "$port" ]; then
+        warn "未找到 Session\\Port 配置，使用默认值 60244"
+        echo "60244"
+    else
+        echo "$port"
+    fi
 }
 
 # 创建系统用户函数
@@ -238,10 +253,15 @@ if [ ! -d "$BASE_CONFIG" ]; then
 fi
 
 # 检查qBittorrent.conf文件是否存在
-if [ ! -f "$BASE_CONFIG/qBittorrent.conf" ]; then
-    error "配置文件不存在: $BASE_CONFIG/qBittorrent.conf"
+BASE_CONFIG_FILE="$BASE_CONFIG/qBittorrent.conf"
+if [ ! -f "$BASE_CONFIG_FILE" ]; then
+    error "配置文件不存在: $BASE_CONFIG_FILE"
     exit 1
 fi
+
+# 读取基础配置的 Session\Port
+BASE_SESSION_PORT=$(read_base_session_port "$BASE_CONFIG_FILE")
+info "读取到基础 Session\\Port: $BASE_SESSION_PORT"
 
 # 检查端口冲突
 info "检查端口占用情况..."
@@ -249,6 +269,7 @@ CONFLICT_PORTS=()
 for i in $(seq 0 $((NUM_INSTANCES - 1))); do
     WEBUI_PORT=$((START_PORT + i))
     CONNECTION_PORT=$((45000 + START_PORT + i))
+    SESSION_PORT=$((BASE_SESSION_PORT + (i * 2)))  # 基础端口 + i*2
     
     if ! check_port $WEBUI_PORT; then
         CONFLICT_PORTS+=("WebUI端口 $WEBUI_PORT")
@@ -256,6 +277,10 @@ for i in $(seq 0 $((NUM_INSTANCES - 1))); do
     
     if ! check_port $CONNECTION_PORT; then
         CONFLICT_PORTS+=("连接端口 $CONNECTION_PORT")
+    fi
+    
+    if ! check_port $SESSION_PORT; then
+        CONFLICT_PORTS+=("Session端口 $SESSION_PORT")
     fi
 done
 
@@ -269,20 +294,23 @@ if [ ${#CONFLICT_PORTS[@]} -gt 0 ]; then
 fi
 
 echo "========================================="
-echo "qBittorrent多开配置 - 自定义版"
+echo "qBittorrent多开配置 - 增强版"
 echo "========================================="
 info "实例数量: $NUM_INSTANCES"
 info "起始端口: $START_PORT"
 info "用户前缀: $USER_PREFIX"
 info "基础用户: $BASE_USER"
 info "基础配置: $BASE_CONFIG"
+info "基础 Session\\Port: $BASE_SESSION_PORT"
 info "qBittorrent路径: $QB_NOX_PATH"
 info "默认密码: $DEFAULT_PASSWORD"
+info "Session端口递增: 每个实例 +2"
 echo ""
 
 # 创建多个实例
 CREATED_USERS=()
 CREATED_SERVICES=()
+PORT_ASSIGNMENTS=()
 
 for i in $(seq 1 $NUM_INSTANCES); do
     NEW_USER="$USER_PREFIX$i"
@@ -328,34 +356,47 @@ for i in $(seq 1 $NUM_INSTANCES); do
     # 计算新的端口
     NEW_WEBUI_PORT=$((START_PORT + i - 1))
     NEW_CONNECTION_PORT=$((45000 + START_PORT + i - 1))
+    NEW_SESSION_PORT=$((BASE_SESSION_PORT + (i - 1) * 2))  # 基础端口 + (实例序号-1)*2
     
-    info "修改配置文件"
-    info "WebUI端口: $NEW_WEBUI_PORT"
-    info "连接端口: $NEW_CONNECTION_PORT"
+    info "端口配置:"
+    info "  WebUI端口: $NEW_WEBUI_PORT"
+    info "  连接端口: $NEW_CONNECTION_PORT"
+    info "  Session端口: $NEW_SESSION_PORT (基础$BASE_SESSION_PORT + $((i - 1))*2)"
     
-    # 修改配置文件中的端口（修复版）
+    # 保存端口分配信息
+    PORT_ASSIGNMENTS+=("$NEW_USER|$NEW_WEBUI_PORT|$NEW_CONNECTION_PORT|$NEW_SESSION_PORT")
+    
+    # 修改配置文件中的端口
     CONFIG_FILE="$NEW_CONFIG/qBittorrent.conf"
     
     if [ -f "$CONFIG_FILE" ]; then
-        # 计算 Session\Port（在原基础上递增，避免冲突）
-        # 假设基础端口是 60244，每个实例递增1
-        BASE_SESSION_PORT=60244
-        NEW_SESSION_PORT=$((BASE_SESSION_PORT + i - 1))
+        info "修改配置文件"
         
-        # 使用sed修改端口配置
+        # 修改 WebUI 端口
         sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
+        
+        # 修改 Connection 端口
         sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_CONNECTION_PORT/" "$CONFIG_FILE"
         
-        # 关键修复：修改 Session\Port（BitTorrent监听端口）
+        # 关键修改：Session\Port（BitTorrent监听端口）
         sed -i "s/^Session\\\\Port=.*/Session\\\\Port=$NEW_SESSION_PORT/" "$CONFIG_FILE"
         
         # 替换路径中的用户名
         sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
         
         success "配置文件已更新"
-        info "  WebUI端口: $NEW_WEBUI_PORT"
-        info "  连接端口: $NEW_CONNECTION_PORT"
-        info "  Session端口: $NEW_SESSION_PORT"
+        
+        # 验证配置是否修改成功
+        VERIFY_SESSION=$(grep "^Session\\\\Port=" "$CONFIG_FILE" | sed 's/Session\\Port=//')
+        VERIFY_WEBUI=$(grep "^WebUI\\\\Port=" "$CONFIG_FILE" | sed 's/WebUI\\Port=//')
+        
+        if [ "$VERIFY_SESSION" = "$NEW_SESSION_PORT" ] && [ "$VERIFY_WEBUI" = "$NEW_WEBUI_PORT" ]; then
+            success "端口配置验证通过"
+        else
+            warn "端口配置可能存在问题，请手动检查"
+            warn "  期望 Session\\Port=$NEW_SESSION_PORT, 实际=$VERIFY_SESSION"
+            warn "  期望 WebUI\\Port=$NEW_WEBUI_PORT, 实际=$VERIFY_WEBUI"
+        fi
     else
         warn "配置文件不存在: $CONFIG_FILE"
     fi
@@ -365,7 +406,6 @@ for i in $(seq 1 $NUM_INSTANCES); do
     SERVICE_NAME="qbittorrent-$NEW_USER"
     
     info "创建服务文件: $SERVICE_FILE"
-    info "服务名称: $SERVICE_NAME"
     
     cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -400,20 +440,16 @@ done
 
 # 获取当前主机IP地址
 get_host_ip() {
-    # 方法1: 优先使用ip命令获取默认路由的IP
     local ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' | head -1)
     
-    # 方法2: 如果方法1失败，尝试hostname -I
     if [ -z "$ip" ]; then
         ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     fi
     
-    # 方法3: 如果还是失败，使用ifconfig解析
     if [ -z "$ip" ]; then
         ip=$(ifconfig 2>/dev/null | grep -E 'inet.*broadcast' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
     fi
     
-    # 如果所有方法都失败，返回localhost
     if [ -z "$ip" ]; then
         ip="localhost"
     fi
@@ -429,12 +465,13 @@ echo "========================================="
 echo ""
 
 if [ ${#CREATED_USERS[@]} -gt 0 ]; then
-    info "📊 端口分配情况:"
-    for i in $(seq 1 ${#CREATED_USERS[@]}); do
-        username="${CREATED_USERS[$((i-1))]}"
-        webui_port=$((START_PORT + i - 1))
-        conn_port=$((45000 + START_PORT + i - 1))
-        echo "   $username: WebUI=$webui_port, 连接=$conn_port"
+    info "📊 完整端口分配情况:"
+    echo ""
+    printf "   %-15s %-10s %-10s %-10s\n" "用户名" "WebUI" "连接端口" "Session"
+    echo "   ───────────────────────────────────────────────────"
+    for assignment in "${PORT_ASSIGNMENTS[@]}"; do
+        IFS='|' read -r username webui conn session <<< "$assignment"
+        printf "   %-15s %-10s %-10s %-10s\n" "$username" "$webui" "$conn" "$session"
     done
     
     echo ""
@@ -456,10 +493,9 @@ if [ ${#CREATED_USERS[@]} -gt 0 ]; then
     
     echo ""
     info "🌐 Web界面访问:"
-    for i in $(seq 1 ${#CREATED_USERS[@]}); do
-        username="${CREATED_USERS[$((i-1))]}"
-        webui_port=$((START_PORT + i - 1))
-        echo "   $username: http://$HOST_IP:$webui_port"
+    for assignment in "${PORT_ASSIGNMENTS[@]}"; do
+        IFS='|' read -r username webui conn session <<< "$assignment"
+        echo "   $username: http://$HOST_IP:$webui"
     done
     
     echo ""
@@ -473,15 +509,31 @@ if [ ${#CREATED_USERS[@]} -gt 0 ]; then
     echo "   $STOP_COMMAND"
     
     echo ""
+    warn "⚠️  重要说明:"
+    echo "   1. Session\\Port 递增规则: 基础端口($BASE_SESSION_PORT) + 实例序号*2"
+    echo "   2. 第1个实例: $BASE_SESSION_PORT"
+    echo "   3. 第2个实例: $((BASE_SESSION_PORT + 2))"
+    echo "   4. 第3个实例: $((BASE_SESSION_PORT + 4))"
+    echo "   5. 避免端口冲突，每个实例间隔2个端口"
+    
+    echo ""
     warn "⚠️  注意事项:"
     echo "   1. 每个实例都创建了真正的系统用户"
     echo "   2. 用户默认密码为: $DEFAULT_PASSWORD"
     echo "   3. 服务以对应用户身份运行，更加安全"
-    echo "   4. 确保防火墙允许新的端口范围: $START_PORT-$((START_PORT + NUM_INSTANCES - 1))"
+    echo "   4. 确保防火墙允许端口范围:"
+    echo "      - WebUI: $START_PORT-$((START_PORT + NUM_INSTANCES - 1))"
+    echo "      - Connection: $((45000 + START_PORT))-$((45000 + START_PORT + NUM_INSTANCES - 1))"
+    echo "      - Session: $BASE_SESSION_PORT-$((BASE_SESSION_PORT + (NUM_INSTANCES - 1) * 2))"
     echo "   5. 各实例配置独立，互不干扰"
     echo "   6. 配置目录: /home/${USER_PREFIX}[1-$NUM_INSTANCES]/.config/qBittorrent/"
     echo "   7. 下载目录: /home/${USER_PREFIX}[1-$NUM_INSTANCES]/qbittorrent/Downloads/"
     echo "   8. 可以使用SSH登录对应用户进行管理"
+    
+    echo ""
+    info "🔧 配置验证:"
+    echo "   查看所有实例的 Session\\Port 配置:"
+    echo "   grep 'Session\\\\Port' /home/${USER_PREFIX}*/.config/qBittorrent/qBittorrent.conf"
     
     echo ""
     info "🔧 故障排查:"
