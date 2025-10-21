@@ -1,7 +1,8 @@
 #!/bin/bash
-# qBittorrent多开简化配置脚本 - 修复版
-# 动态读取 Session\Port 并递增配置
-# 修复：新实例端口从 BASE_SESSION_PORT + 2 开始（跳过基础用户端口）
+# qBittorrent多开简化配置脚本 - 支持版本判断
+# 动态读取端口配置并递增
+# 4.3+版本使用 Connection\PortRangeMin
+# 4.3以下版本使用 Session\Port
 
 # 颜色定义
 RED='\033[0;31m'
@@ -20,7 +21,7 @@ need_input() { echo -e "${YELLOW}[INPUT]${NC} $1"; }
 # 显示帮助信息
 show_help() {
     cat << EOF
-qBittorrent多开配置脚本 - 修复版
+qBittorrent多开配置脚本 - 支持版本判断
 
 使用方法:
     $0 <实例数量> [起始端口] [用户名前缀]
@@ -39,8 +40,8 @@ qBittorrent多开配置脚本 - 修复版
     $0                            # 进入交互模式
 
 功能:
-    - 自动读取基础配置的 Session\Port 端口
-    - 新实例 Session\Port 从基础端口+2开始递增
+    - 支持qBittorrent 4.3+和4.3以下版本
+    - 4.3+使用Connection\PortRangeMin，4.3以下使用Session\Port
     - 创建真正的系统用户
     - 独立的配置目录和下载目录
     - 自动端口分配（WebUI、Connection、Session三组端口）
@@ -49,33 +50,66 @@ qBittorrent多开配置脚本 - 修复版
 EOF
 }
 
-# 验证端口是否可用（不包括基础端口，因为基础用户会继续运行）
+# 版本比较函数
+version_ge() {
+    # 比较版本号是否 >= 4.3
+    local version=$1
+    local major minor
+    
+    # 提取主版本号和次版本号
+    major=$(echo "$version" | cut -d. -f1)
+    minor=$(echo "$version" | cut -d. -f2)
+    
+    if [ "$major" -gt 4 ]; then
+        return 0
+    elif [ "$major" -eq 4 ] && [ "$minor" -ge 3 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# 验证端口是否可用
 check_port() {
     local port=$1
     local is_base_port=$2
     
     if netstat -tulpn 2>/dev/null | grep -q ":$port "; then
-        # 如果是基础端口且已被占用，说明基础用户正在运行，这是预期的
         if [ "$is_base_port" = "1" ]; then
-            return 0  # 基础端口被占用是正常的
+            return 0
         fi
-        return 1  # 其他端口被占用则冲突
+        return 1
     fi
-    return 0  # 端口可用
+    return 0
 }
 
-# 读取基础配置中的 Session\Port
-read_base_session_port() {
+# 根据版本读取基础配置中的端口
+read_base_port() {
     local config_file=$1
+    local qb_version=$2
     local port
+    local port_key
     
-    port=$(grep "^Session\\\\Port=" "$config_file" | sed 's/Session\\Port=//')
-    
-    if [ -z "$port" ]; then
-        warn "未找到 Session\\Port 配置，使用默认值 60244"
-        echo "60244"
+    if version_ge "$qb_version"; then
+        # 4.3+ 版本使用 Connection\PortRangeMin
+        port_key="Connection\\\\PortRangeMin"
+        port=$(grep "^Connection\\\\PortRangeMin=" "$config_file" | sed 's/Connection\\PortRangeMin=//')
+        if [ -z "$port" ]; then
+            warn "未找到 Connection\\PortRangeMin 配置，使用默认值 23335"
+            echo "23335"
+        else
+            echo "$port"
+        fi
     else
-        echo "$port"
+        # 4.3以下版本使用 Session\Port
+        port_key="Session\\\\Port"
+        port=$(grep "^Session\\\\Port=" "$config_file" | sed 's/Session\\Port=//')
+        if [ -z "$port" ]; then
+            warn "未找到 Session\\Port 配置，使用默认值 60244"
+            echo "60244"
+        else
+            echo "$port"
+        fi
     fi
 }
 
@@ -115,6 +149,22 @@ interactive_input() {
     echo "qBittorrent多开配置 - 交互模式"
     echo "========================================="
     echo ""
+    
+    # 询问版本号
+    while true; do
+        need_input "请输入qBittorrent版本号 (如: 4.3.9, 4.2.5): "
+        read -r QB_VERSION
+        if [[ "$QB_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            if version_ge "$QB_VERSION"; then
+                info "检测到版本 $QB_VERSION >= 4.3，将使用 Connection\\PortRangeMin"
+            else
+                info "检测到版本 $QB_VERSION < 4.3，将使用 Session\\Port"
+            fi
+            break
+        else
+            error "请输入有效的版本号格式 (如: 4.3.9)"
+        fi
+    done
     
     while true; do
         need_input "请输入要创建的实例数量 (1-20): "
@@ -167,6 +217,7 @@ interactive_input() {
     
     echo ""
     info "配置确认："
+    info "qBittorrent版本: $QB_VERSION"
     info "实例数量: $NUM_INSTANCES"
     info "起始端口: $START_PORT"
     info "用户前缀: $USER_PREFIX"
@@ -203,6 +254,26 @@ elif [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     show_help
     exit 0
 else
+    # 命令行模式也需要询问版本
+    echo "========================================="
+    echo "qBittorrent多开配置"
+    echo "========================================="
+    while true; do
+        need_input "请输入qBittorrent版本号 (如: 4.3.9, 4.2.5): "
+        read -r QB_VERSION
+        if [[ "$QB_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            if version_ge "$QB_VERSION"; then
+                info "检测到版本 $QB_VERSION >= 4.3，将使用 Connection\\PortRangeMin"
+            else
+                info "检测到版本 $QB_VERSION < 4.3，将使用 Session\\Port"
+            fi
+            break
+        else
+            error "请输入有效的版本号格式 (如: 4.3.9)"
+        fi
+    done
+    echo ""
+    
     NUM_INSTANCES=$1
     START_PORT=${2:-8081}
     USER_PREFIX=${3:-"heshui"}
@@ -244,16 +315,22 @@ if [ ! -f "$BASE_CONFIG_FILE" ]; then
     exit 1
 fi
 
-BASE_SESSION_PORT=$(read_base_session_port "$BASE_CONFIG_FILE")
-info "读取到基础 Session\\Port: $BASE_SESSION_PORT"
+BASE_PORT=$(read_base_port "$BASE_CONFIG_FILE" "$QB_VERSION")
+if version_ge "$QB_VERSION"; then
+    PORT_KEY_NAME="Connection\\PortRangeMin"
+    info "读取到基础 Connection\\PortRangeMin: $BASE_PORT"
+else
+    PORT_KEY_NAME="Session\\Port"
+    info "读取到基础 Session\\Port: $BASE_PORT"
+fi
 
-# 检查端口冲突（关键修复：不检查基础端口，只检查新实例的端口）
+# 检查端口冲突
 info "检查端口占用情况..."
 CONFLICT_PORTS=()
 for i in $(seq 1 $NUM_INSTANCES); do
     WEBUI_PORT=$((START_PORT + i - 1))
     CONNECTION_PORT=$((45000 + START_PORT + i - 1))
-    SESSION_PORT=$((BASE_SESSION_PORT + i * 2))  # 从基础端口+2开始
+    SESSION_PORT=$((BASE_PORT + i * 2))
     
     if ! check_port $WEBUI_PORT "0"; then
         CONFLICT_PORTS+=("WebUI端口 $WEBUI_PORT")
@@ -264,7 +341,7 @@ for i in $(seq 1 $NUM_INSTANCES); do
     fi
     
     if ! check_port $SESSION_PORT "0"; then
-        CONFLICT_PORTS+=("Session端口 $SESSION_PORT")
+        CONFLICT_PORTS+=("${PORT_KEY_NAME}端口 $SESSION_PORT")
     fi
 done
 
@@ -278,14 +355,16 @@ if [ ${#CONFLICT_PORTS[@]} -gt 0 ]; then
 fi
 
 echo "========================================="
-echo "qBittorrent多开配置 - 修复版"
+echo "qBittorrent多开配置"
 echo "========================================="
+info "qBittorrent版本: $QB_VERSION"
+info "端口配置键: $PORT_KEY_NAME"
 info "实例数量: $NUM_INSTANCES"
 info "起始端口: $START_PORT"
 info "用户前缀: $USER_PREFIX"
 info "基础用户: $BASE_USER"
 info "基础配置: $BASE_CONFIG"
-info "基础 Session\\Port: $BASE_SESSION_PORT"
+info "基础端口: $BASE_PORT"
 info "qBittorrent路径: $QB_NOX_PATH"
 info "默认密码: $DEFAULT_PASSWORD"
 echo ""
@@ -330,15 +409,14 @@ for i in $(seq 1 $NUM_INSTANCES); do
     info "创建下载目录: $DOWNLOADS_DIR"
     sudo -u "$NEW_USER" mkdir -p "$DOWNLOADS_DIR"
     
-    # 关键修复：第i个实例的Session端口 = 基础端口 + i*2
     NEW_WEBUI_PORT=$((START_PORT + i - 1))
     NEW_CONNECTION_PORT=$((45000 + START_PORT + i - 1))
-    NEW_SESSION_PORT=$((BASE_SESSION_PORT + i * 2))
+    NEW_SESSION_PORT=$((BASE_PORT + i * 2))
     
     info "端口配置:"
     info "  WebUI端口: $NEW_WEBUI_PORT"
     info "  连接端口: $NEW_CONNECTION_PORT"
-    info "  Session端口: $NEW_SESSION_PORT (基础$BASE_SESSION_PORT + $i*2)"
+    info "  ${PORT_KEY_NAME}: $NEW_SESSION_PORT (基础$BASE_PORT + $i*2)"
     
     PORT_ASSIGNMENTS+=("$NEW_USER|$NEW_WEBUI_PORT|$NEW_CONNECTION_PORT|$NEW_SESSION_PORT")
     
@@ -348,16 +426,29 @@ for i in $(seq 1 $NUM_INSTANCES); do
         info "修改配置文件"
         
         sed -i "s/^WebUI\\\\Port=.*/WebUI\\\\Port=$NEW_WEBUI_PORT/" "$CONFIG_FILE"
-        sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_CONNECTION_PORT/" "$CONFIG_FILE"
-        sed -i "s/^Session\\\\Port=.*/Session\\\\Port=$NEW_SESSION_PORT/" "$CONFIG_FILE"
+        
+        # 根据版本修改不同的配置项
+        if version_ge "$QB_VERSION"; then
+            # 4.3+ 版本修改 Connection\PortRangeMin
+            sed -i "s/^Connection\\\\PortRangeMin=.*/Connection\\\\PortRangeMin=$NEW_SESSION_PORT/" "$CONFIG_FILE"
+        else
+            # 4.3以下版本修改 Session\Port
+            sed -i "s/^Session\\\\Port=.*/Session\\\\Port=$NEW_SESSION_PORT/" "$CONFIG_FILE"
+        fi
+        
         sed -i "s|/home/$BASE_USER/|/home/$NEW_USER/|g" "$CONFIG_FILE"
         
         success "配置文件已更新"
         
-        VERIFY_SESSION=$(grep "^Session\\\\Port=" "$CONFIG_FILE" | sed 's/Session\\Port=//')
+        # 验证配置
+        if version_ge "$QB_VERSION"; then
+            VERIFY_PORT=$(grep "^Connection\\\\PortRangeMin=" "$CONFIG_FILE" | sed 's/Connection\\PortRangeMin=//')
+        else
+            VERIFY_PORT=$(grep "^Session\\\\Port=" "$CONFIG_FILE" | sed 's/Session\\Port=//')
+        fi
         VERIFY_WEBUI=$(grep "^WebUI\\\\Port=" "$CONFIG_FILE" | sed 's/WebUI\\Port=//')
         
-        if [ "$VERIFY_SESSION" = "$NEW_SESSION_PORT" ] && [ "$VERIFY_WEBUI" = "$NEW_WEBUI_PORT" ]; then
+        if [ "$VERIFY_PORT" = "$NEW_SESSION_PORT" ] && [ "$VERIFY_WEBUI" = "$NEW_WEBUI_PORT" ]; then
             success "端口配置验证通过"
         else
             warn "端口配置可能存在问题"
@@ -423,7 +514,7 @@ echo ""
 if [ ${#CREATED_USERS[@]} -gt 0 ]; then
     info "📊 完整端口分配情况:"
     echo ""
-    printf "   %-15s %-10s %-10s %-10s\n" "用户名" "WebUI" "连接端口" "Session"
+    printf "   %-15s %-10s %-10s %-10s\n" "用户名" "WebUI" "连接端口" "$PORT_KEY_NAME"
     echo "   ───────────────────────────────────────────────────"
     for assignment in "${PORT_ASSIGNMENTS[@]}"; do
         IFS='|' read -r username webui conn session <<< "$assignment"
@@ -431,11 +522,11 @@ if [ ${#CREATED_USERS[@]} -gt 0 ]; then
     done
     
     echo ""
-    info "📋 端口递增规则 (Session\\Port):"
-    echo "   基础用户 (heshui): $BASE_SESSION_PORT"
+    info "📋 端口递增规则 ($PORT_KEY_NAME):"
+    echo "   基础用户 ($BASE_USER): $BASE_PORT"
     for i in $(seq 1 $NUM_INSTANCES); do
-        NEW_SESSION_PORT=$((BASE_SESSION_PORT + i * 2))
-        echo "   实例 $i: $NEW_SESSION_PORT (基础$BASE_SESSION_PORT + $i*2)"
+        NEW_SESSION_PORT=$((BASE_PORT + i * 2))
+        echo "   实例 $i: $NEW_SESSION_PORT (基础$BASE_PORT + $i*2)"
     done
     
     echo ""
