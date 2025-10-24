@@ -152,7 +152,7 @@ interactive_input() {
     
     # 询问版本号
     while true; do
-        need_input "请输入qBittorrent版本号 (如: 4.3.9, 4.2.5): "
+        need_input "请输入qBittorrent版本号 (如: 4.1.9, 5.0.4): "
         read -r QB_VERSION
         if [[ "$QB_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             if version_ge "$QB_VERSION"; then
