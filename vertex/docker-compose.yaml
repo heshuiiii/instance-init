@@ -1,0 +1,16 @@
+services:
+  vertex:
+    image: lswl/vertex:stable
+    container_name: vertex
+    volumes:
+      - ./vertex:/vertex
+    # ports:
+    #   - 3077:3000
+    environment:
+      - TZ=Asia/Shanghai
+      - PORT=3077
+      - REDISPORT=6467
+      - PUID=0
+      - PGID=0
+    restart: unless-stopped
+    network_mode: host
