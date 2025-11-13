@@ -1,9 +1,10 @@
 #!/bin/bash
 
 ###############################################################################
-# Private Tracker 上传优化脚本 - 通用高速网络版
+# Private Tracker 上传优化脚本 - 通用高速网络版 v2.0
 # 适用场景：2.5Gbps / 10Gbps 网络，低延迟环境
-# 作者：Claude | 日期：2025-11-13
+# 作者：Claude | 更新日期：2025-11-13
+# 特性：支持多队列网卡自动检测和适配
 ###############################################################################
 
 set -e
@@ -12,10 +13,11 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}==================================================${NC}"
-echo -e "${GREEN}  PT 上传优化配置脚本 - 通用高速网络版${NC}"
+echo -e "${GREEN}  PT 上传优化配置脚本 v2.0${NC}"
 echo -e "${GREEN}  支持：2.5Gbps / 10Gbps 网络${NC}"
 echo -e "${GREEN}==================================================${NC}"
 echo ""
@@ -28,32 +30,61 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 自动检测网卡
-echo -e "${YELLOW}[1/6] 检测网络接口...${NC}"
+echo -e "${YELLOW}[1/7] 检测网络接口...${NC}"
 NETWORK_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 
 if [ -z "$NETWORK_INTERFACE" ]; then
     echo -e "${RED}无法自动检测网卡，请手动指定：${NC}"
-    read -p "请输入网卡名称 (如 eth0, ens33): " NETWORK_INTERFACE
+    read -p "请输入网卡名称 (如 eth0, ens33, eno1np0): " NETWORK_INTERFACE
 fi
 
 echo -e "${GREEN}✓ 使用网卡: $NETWORK_INTERFACE${NC}"
 
-# 检测当前带宽（可选）
+# 检测当前带宽和队列类型
 LINK_SPEED=$(ethtool $NETWORK_INTERFACE 2>/dev/null | grep "Speed:" | awk '{print $2}' || echo "Unknown")
 echo -e "${GREEN}  当前速率: $LINK_SPEED${NC}"
+
+# 检测是否为多队列网卡
+QDISC_TYPE=$(tc qdisc show dev $NETWORK_INTERFACE | head -n1 | awk '{print $2}')
+IS_MULTI_QUEUE=false
+if [ "$QDISC_TYPE" = "mq" ]; then
+    IS_MULTI_QUEUE=true
+    echo -e "${BLUE}  网卡类型: 多队列网卡 (MQ)${NC}"
+else
+    echo -e "${BLUE}  网卡类型: 单队列网卡${NC}"
+fi
 echo ""
 
 # 备份现有配置
-echo -e "${YELLOW}[2/6] 备份现有配置...${NC}"
+echo -e "${YELLOW}[2/7] 备份现有配置...${NC}"
 BACKUP_FILE="/etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S)"
 cp /etc/sysctl.conf "$BACKUP_FILE"
 echo -e "${GREEN}✓ 已备份到: $BACKUP_FILE${NC}"
 echo ""
 
-# 写入优化配置
-echo -e "${YELLOW}[3/6] 应用 TCP 优化参数...${NC}"
+# 检查是否已有配置（避免重复添加）
+echo -e "${YELLOW}[3/7] 检查现有配置...${NC}"
+if grep -q "PT 上传优化配置" /etc/sysctl.conf; then
+    echo -e "${YELLOW}! 检测到已有 PT 优化配置${NC}"
+    read -p "是否覆盖现有配置? [y/N]: " OVERWRITE
+    if [[ ! "$OVERWRITE" =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}保留现有配置，跳过 sysctl 修改${NC}"
+        SKIP_SYSCTL=true
+    else
+        # 删除旧配置
+        sed -i '/# PT 上传优化配置/,/# 配置结束/d' /etc/sysctl.conf
+        SKIP_SYSCTL=false
+    fi
+else
+    SKIP_SYSCTL=false
+fi
+echo ""
 
-cat >> /etc/sysctl.conf << 'EOF'
+# 写入优化配置
+if [ "$SKIP_SYSCTL" = false ]; then
+    echo -e "${YELLOW}[4/7] 应用 TCP 优化参数...${NC}"
+
+    cat >> /etc/sysctl.conf << 'EOF'
 
 ###############################################################################
 # PT 上传优化配置 - 通用高速网络优化
@@ -139,20 +170,20 @@ net.ipv4.neigh.default.gc_thresh3 = 16384
 ###############################################################################
 EOF
 
-echo -e "${GREEN}✓ TCP 参数配置完成${NC}"
+    echo -e "${GREEN}✓ TCP 参数配置完成${NC}"
+else
+    echo -e "${YELLOW}[4/7] 跳过 TCP 参数配置（使用现有配置）${NC}"
+fi
 echo ""
 
 # 应用 sysctl 配置
-echo -e "${YELLOW}[4/6] 应用 sysctl 配置...${NC}"
+echo -e "${YELLOW}[5/7] 应用 sysctl 配置...${NC}"
 sysctl -p > /dev/null 2>&1
 echo -e "${GREEN}✓ sysctl 配置已生效${NC}"
 echo ""
 
 # 配置 tc 队列调度器和限速
-echo -e "${YELLOW}[5/6] 配置队列调度器和带宽限制...${NC}"
-
-# 删除旧的 qdisc 规则（如果存在）
-tc qdisc del dev $NETWORK_INTERFACE root 2>/dev/null || true
+echo -e "${YELLOW}[6/7] 配置队列调度器和带宽限制...${NC}"
 
 # 针对不同带宽网卡设置合适的 maxrate
 echo -e "${YELLOW}请选择限速策略：${NC}"
@@ -185,17 +216,50 @@ case $RATE_OPTION in
         ;;
 esac
 
-if [ -n "$MAXRATE" ]; then
-    tc qdisc add dev $NETWORK_INTERFACE root fq maxrate $MAXRATE
-    echo -e "${GREEN}✓ 已设置 FQ 调度器，限速: $MAXRATE${NC}"
+# 删除旧的 qdisc 规则（支持多队列网卡）
+echo -e "${BLUE}  正在清理现有队列规则...${NC}"
+tc qdisc del dev $NETWORK_INTERFACE root 2>/dev/null || true
+
+# 根据网卡类型配置
+if [ "$IS_MULTI_QUEUE" = true ]; then
+    echo -e "${BLUE}  检测到多队列网卡，使用特殊配置...${NC}"
+    # 多队列网卡需要先删除 mq，然后直接添加 fq
+    if [ -n "$MAXRATE" ]; then
+        tc qdisc replace dev $NETWORK_INTERFACE root fq maxrate $MAXRATE
+        echo -e "${GREEN}✓ 已设置 FQ 调度器（多队列网卡），限速: $MAXRATE${NC}"
+    else
+        tc qdisc replace dev $NETWORK_INTERFACE root fq
+        echo -e "${GREEN}✓ 已设置 FQ 调度器（多队列网卡），不限速${NC}"
+    fi
 else
-    tc qdisc add dev $NETWORK_INTERFACE root fq
-    echo -e "${GREEN}✓ 已设置 FQ 调度器，不限速${NC}"
+    # 单队列网卡直接添加
+    if [ -n "$MAXRATE" ]; then
+        tc qdisc add dev $NETWORK_INTERFACE root fq maxrate $MAXRATE
+        echo -e "${GREEN}✓ 已设置 FQ 调度器，限速: $MAXRATE${NC}"
+    else
+        tc qdisc add dev $NETWORK_INTERFACE root fq
+        echo -e "${GREEN}✓ 已设置 FQ 调度器，不限速${NC}"
+    fi
+fi
+
+# 验证 TC 配置
+echo -e "${BLUE}  验证队列配置...${NC}"
+if tc qdisc show dev $NETWORK_INTERFACE | grep -q "qdisc fq"; then
+    echo -e "${GREEN}✓ FQ 调度器配置成功${NC}"
+else
+    echo -e "${RED}✗ FQ 调度器配置失败，请检查${NC}"
 fi
 echo ""
 
 # 创建启动脚本（持久化 tc 配置）
-echo -e "${YELLOW}[6/6] 创建开机启动脚本...${NC}"
+echo -e "${YELLOW}[7/7] 创建开机启动脚本...${NC}"
+
+# 生成 TC 配置命令
+if [ -n "$MAXRATE" ]; then
+    TC_COMMAND="tc qdisc replace dev $NETWORK_INTERFACE root fq maxrate $MAXRATE"
+else
+    TC_COMMAND="tc qdisc replace dev $NETWORK_INTERFACE root fq"
+fi
 
 # 检测系统类型
 if [ -d /etc/systemd/system ]; then
@@ -203,12 +267,15 @@ if [ -d /etc/systemd/system ]; then
     cat > /etc/systemd/system/pt-tc-optimizer.service << EOF
 [Unit]
 Description=PT Upload Traffic Control Optimizer
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/bin/pt-tc-setup.sh
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -217,19 +284,41 @@ EOF
     # 创建执行脚本
     cat > /usr/local/bin/pt-tc-setup.sh << EOF
 #!/bin/bash
+# PT TC Optimizer - Auto-generated script
+# Network Interface: $NETWORK_INTERFACE
+# Multi-Queue: $IS_MULTI_QUEUE
+# Max Rate: ${MAXRATE:-unlimited}
+
+# 等待网卡就绪
+sleep 2
+
+# 删除旧规则
 tc qdisc del dev $NETWORK_INTERFACE root 2>/dev/null || true
+
+# 应用新规则
+$TC_COMMAND
+
+# 验证配置
+if tc qdisc show dev $NETWORK_INTERFACE | grep -q "qdisc fq"; then
+    echo "TC configuration applied successfully"
+    exit 0
+else
+    echo "TC configuration failed"
+    exit 1
+fi
 EOF
-    
-    if [ -n "$MAXRATE" ]; then
-        echo "tc qdisc add dev $NETWORK_INTERFACE root fq maxrate $MAXRATE" >> /usr/local/bin/pt-tc-setup.sh
-    else
-        echo "tc qdisc add dev $NETWORK_INTERFACE root fq" >> /usr/local/bin/pt-tc-setup.sh
-    fi
     
     chmod +x /usr/local/bin/pt-tc-setup.sh
     systemctl daemon-reload
     systemctl enable pt-tc-optimizer.service
-    echo -e "${GREEN}✓ 已创建 systemd 服务: pt-tc-optimizer.service${NC}"
+    
+    # 立即启动服务验证
+    if systemctl start pt-tc-optimizer.service; then
+        echo -e "${GREEN}✓ 已创建并启动 systemd 服务: pt-tc-optimizer.service${NC}"
+    else
+        echo -e "${YELLOW}! systemd 服务创建成功，但启动失败，请检查${NC}"
+        echo -e "${YELLOW}  运行 'systemctl status pt-tc-optimizer.service' 查看详情${NC}"
+    fi
 
 elif [ -f /etc/rc.local ]; then
     # 使用 rc.local
@@ -237,18 +326,18 @@ elif [ -f /etc/rc.local ]; then
         sed -i '/^exit 0/d' /etc/rc.local 2>/dev/null || true
         echo "" >> /etc/rc.local
         echo "# PT Upload Traffic Control Optimizer" >> /etc/rc.local
+        echo "sleep 2" >> /etc/rc.local
         echo "tc qdisc del dev $NETWORK_INTERFACE root 2>/dev/null || true" >> /etc/rc.local
-        if [ -n "$MAXRATE" ]; then
-            echo "tc qdisc add dev $NETWORK_INTERFACE root fq maxrate $MAXRATE" >> /etc/rc.local
-        else
-            echo "tc qdisc add dev $NETWORK_INTERFACE root fq" >> /etc/rc.local
-        fi
+        echo "$TC_COMMAND" >> /etc/rc.local
         echo "exit 0" >> /etc/rc.local
         chmod +x /etc/rc.local
         echo -e "${GREEN}✓ 已添加到 /etc/rc.local${NC}"
+    else
+        echo -e "${YELLOW}! /etc/rc.local 中已存在配置，请手动检查${NC}"
     fi
 else
     echo -e "${YELLOW}! 未检测到 systemd 或 rc.local，请手动添加 tc 命令到启动脚本${NC}"
+    echo -e "${YELLOW}  命令: $TC_COMMAND${NC}"
 fi
 echo ""
 
@@ -257,19 +346,41 @@ echo -e "${GREEN}==================================================${NC}"
 echo -e "${GREEN}  配置验证${NC}"
 echo -e "${GREEN}==================================================${NC}"
 
+echo -e "\n${YELLOW}网卡信息:${NC}"
+echo "  接口: $NETWORK_INTERFACE"
+echo "  速率: $LINK_SPEED"
+echo "  类型: $([ "$IS_MULTI_QUEUE" = true ] && echo "多队列网卡 (MQ)" || echo "单队列网卡")"
+
 echo -e "\n${YELLOW}TCP 缓冲区设置:${NC}"
 sysctl net.ipv4.tcp_wmem
 sysctl net.ipv4.tcp_rmem
 
 echo -e "\n${YELLOW}拥塞控制算法:${NC}"
 sysctl net.ipv4.tcp_congestion_control
-lsmod | grep bbr || echo -e "${RED}警告: BBR 模块未加载，可能需要内核 >= 4.9${NC}"
+if lsmod | grep -q bbr; then
+    BBR_CONNECTIONS=$(lsmod | grep bbr | awk '{print $3}')
+    echo -e "${GREEN}✓ BBR 模块已加载 (${BBR_CONNECTIONS} 个连接使用中)${NC}"
+else
+    echo -e "${RED}✗ BBR 模块未加载，可能需要内核 >= 4.9${NC}"
+fi
 
 echo -e "\n${YELLOW}队列调度器:${NC}"
-tc qdisc show dev $NETWORK_INTERFACE
+tc qdisc show dev $NETWORK_INTERFACE | head -n 3
+
+if tc qdisc show dev $NETWORK_INTERFACE | grep -q "qdisc fq.*maxrate"; then
+    CURRENT_RATE=$(tc qdisc show dev $NETWORK_INTERFACE | grep "qdisc fq" | grep -oP 'maxrate \K[^ ]+')
+    echo -e "${GREEN}✓ FQ 调度器已启用，限速: $CURRENT_RATE${NC}"
+elif tc qdisc show dev $NETWORK_INTERFACE | grep -q "qdisc fq"; then
+    echo -e "${GREEN}✓ FQ 调度器已启用，不限速${NC}"
+else
+    echo -e "${YELLOW}! 警告: 未检测到 FQ 调度器${NC}"
+fi
 
 echo -e "\n${YELLOW}连接跟踪表:${NC}"
-sysctl net.netfilter.nf_conntrack_max 2>/dev/null || sysctl net.nf_conntrack_max
+sysctl net.netfilter.nf_conntrack_max 2>/dev/null || sysctl net.nf_conntrack_max 2>/dev/null || echo "conntrack 未启用"
+
+echo -e "\n${YELLOW}端口范围:${NC}"
+sysctl net.ipv4.ip_local_port_range
 
 echo ""
 echo -e "${GREEN}==================================================${NC}"
@@ -277,15 +388,22 @@ echo -e "${GREEN}  优化完成！${NC}"
 echo -e "${GREEN}==================================================${NC}"
 echo ""
 echo -e "${YELLOW}建议操作：${NC}"
-echo "1. 重启系统以确保所有配置生效: ${RED}reboot${NC}"
-echo "2. 重启后验证配置: ${RED}sudo tc qdisc show${NC}"
+echo "1. ${RED}重启系统${NC}以确保所有配置生效: ${RED}reboot${NC}"
+echo "2. 重启后验证 TC 配置: ${RED}tc qdisc show dev $NETWORK_INTERFACE${NC}"
 echo "3. 启动 PT 客户端测试上传速度"
 echo "4. 使用 ${RED}iftop -i $NETWORK_INTERFACE${NC} 监控实时流量"
-echo "5. 如需恢复配置，使用备份文件: $BACKUP_FILE"
+echo "5. 如需恢复配置，使用备份文件: ${RED}$BACKUP_FILE${NC}"
 echo ""
-echo -e "${YELLOW}故障排查：${NC}"
-echo "- 如果 BBR 未启用，请确认内核版本 >= 4.9"
-echo "- 如果上传速度仍不理想，尝试调整 maxrate 值"
+echo -e "${YELLOW}故障排查命令：${NC}"
+echo "- 检查 systemd 服务: ${RED}systemctl status pt-tc-optimizer.service${NC}"
+echo "- 手动应用 TC 配置: ${RED}$TC_COMMAND${NC}"
+echo "- 查看系统日志: ${RED}journalctl -u pt-tc-optimizer.service${NC}"
 echo "- 检查防火墙规则: ${RED}iptables -L -n${NC}"
 echo ""
-echo -e "${GREEN}脚本执行完成！${NC}"
+echo -e "${BLUE}配置摘要：${NC}"
+echo "  网卡: $NETWORK_INTERFACE ($([ "$IS_MULTI_QUEUE" = true ] && echo "多队列" || echo "单队列"))"
+echo "  限速: ${MAXRATE:-不限速}"
+echo "  BBR: $([ "$(sysctl -n net.ipv4.tcp_congestion_control)" = "bbr" ] && echo "已启用" || echo "未启用")"
+echo "  开机启动: $([ -f /etc/systemd/system/pt-tc-optimizer.service ] && echo "systemd" || echo "rc.local")"
+echo ""
+echo -e "${GREEN}脚本执行完成！建议立即重启系统。${NC}"
