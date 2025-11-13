@@ -178,8 +178,12 @@ echo ""
 
 # 应用 sysctl 配置
 echo -e "${YELLOW}[5/7] 应用 sysctl 配置...${NC}"
-sysctl -p > /dev/null 2>&1
-echo -e "${GREEN}✓ sysctl 配置已生效${NC}"
+if timeout 10 sysctl -p 2>&1 | grep -v "net.netfilter.nf_conntrack" > /tmp/sysctl_output.log; then
+    echo -e "${GREEN}✓ sysctl 配置已生效${NC}"
+else
+    echo -e "${YELLOW}! sysctl 部分配置可能失败，但核心参数应已生效${NC}"
+    echo -e "${YELLOW}  详细日志: /tmp/sysctl_output.log${NC}"
+fi
 echo ""
 
 # 配置 tc 队列调度器和限速
