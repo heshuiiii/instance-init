@@ -1,7 +1,6 @@
 # instance-init
 heshui常用脚本
 
-
 ## 安装多个qbittorrent刷流
 ```
 bash <(wget -qO- https://raw.githubusercontent.com/heshuiiii/Dedicated-Seedbox/refs/heads/main/Install.sh) -u 用户名 -p 密码 -c -1 -q 4.3.9 -l v1.2.20
