@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ###############################################################################
-# Private Tracker 上传优化脚本 - 通用高速网络版 v2.1 (无人值守)
+# Private Tracker 上传优化脚本 - 通用高速网络版 v2.2 (默认不限速)
 # 适用场景：2.5Gbps / 10Gbps 网络，低延迟环境
 # 作者：Claude | 更新日期：2025-12-06
-# 特性：支持命令行参数自动化配置
+# 特性：默认不限速，完全无人值守模式
 ###############################################################################
 
 set -e
@@ -18,14 +18,14 @@ NC='\033[0m'
 
 # ==================== 默认配置参数 ====================
 DEFAULT_INTERFACE=""        # 留空则自动检测
-DEFAULT_RATE_OPTION="5"     # 1-5: 对应不同限速策略
+DEFAULT_RATE_OPTION="5"     # 默认不限速
 DEFAULT_OVERWRITE="y"       # y/n: 是否覆盖现有配置
 AUTO_REBOOT="n"            # y/n: 完成后自动重启
 
 # ==================== 显示帮助信息 ====================
 show_help() {
     cat << EOF
-${GREEN}PT 上传优化脚本 v2.1 - 无人值守模式${NC}
+${GREEN}PT 上传优化脚本 v2.2 - 默认不限速版${NC}
 
 用法: 
     $0 [选项]
@@ -35,30 +35,27 @@ ${GREEN}PT 上传优化脚本 v2.1 - 无人值守模式${NC}
     -r, --rate <1-5>            选择限速策略:
                                   1) 2.5Gbps (限速 2.3Gbps)
                                   2) 10Gbps 单流 (限速 9.5Gbps)
-                                  3) 10Gbps 多流 (限速 8Gbps) [默认]
+                                  3) 10Gbps 多流 (限速 8Gbps)
                                   4) 10Gbps 保守 (限速 7Gbps)
-                                  5) 不限速
+                                  5) 不限速 [默认]
     -o, --overwrite             自动覆盖现有配置 (不询问)
     -R, --reboot                配置完成后自动重启
-    -y, --yes                   所有确认自动选 yes (完全无人值守)
+    -y, --yes                   完全无人值守模式
     -h, --help                  显示此帮助信息
 
 示例:
-    # 完全自动化: 使用默认网卡, 8Gbps 限速, 自动重启
+    # 完全自动化: 默认不限速, 自动重启 (推荐)
     $0 -y -R
 
-    # 指定网卡和限速策略
-    $0 -i eth0 -r 3 -o
+    # 指定网卡, 不限速
+    $0 -i eth0 -y
 
-    # 10Gbps 不限速配置
-    $0 -i ens33 -r 5 -y
-
-    # 仅覆盖配置不重启
-    $0 --interface eth0 --rate 3 --overwrite
+    # 指定限速 8Gbps
+    $0 -i eth0 -r 3 -y -R
 
 环境变量 (可选):
     PT_INTERFACE=eth0          等同于 -i eth0
-    PT_RATE=3                  等同于 -r 3
+    PT_RATE=5                  等同于 -r 5 (默认)
     PT_AUTO_REBOOT=y           等同于 -R
 
 EOF
@@ -108,7 +105,7 @@ DEFAULT_RATE_OPTION=${PT_RATE:-$DEFAULT_RATE_OPTION}
 AUTO_REBOOT=${PT_AUTO_REBOOT:-$AUTO_REBOOT}
 
 echo -e "${GREEN}==================================================${NC}"
-echo -e "${GREEN}  PT 上传优化配置脚本 v2.1${NC}"
+echo -e "${GREEN}  PT 上传优化配置脚本 v2.2 (默认不限速)${NC}"
 echo -e "${GREEN}  支持：2.5Gbps / 10Gbps 网络${NC}"
 echo -e "${GREEN}  模式：$([ "$SILENT_MODE" = true ] && echo "无人值守" || echo "交互式")${NC}"
 echo -e "${GREEN}==================================================${NC}"
@@ -172,19 +169,20 @@ cp /etc/sysctl.conf "$BACKUP_FILE"
 echo -e "${GREEN}✓ 已备份到: $BACKUP_FILE${NC}"
 echo ""
 
-# ==================== 检查现有配置 ====================
+# ==================== 检查并覆盖现有配置 ====================
 echo -e "${YELLOW}[3/7] 检查现有配置...${NC}"
 SKIP_SYSCTL=false
 
 if grep -q "PT 上传优化配置" /etc/sysctl.conf; then
     echo -e "${YELLOW}! 检测到已有 PT 优化配置${NC}"
     
-    if [ "$SILENT_MODE" = false ]; then
+    # 无人值守模式直接覆盖
+    if [ "$SILENT_MODE" = true ]; then
+        OVERWRITE="y"
+        echo "  → 自动覆盖现有配置"
+    else
         read -p "是否覆盖现有配置? [y/N]: " OVERWRITE
         OVERWRITE=${OVERWRITE:-$DEFAULT_OVERWRITE}
-    else
-        OVERWRITE=$DEFAULT_OVERWRITE
-        echo "  自动选择: $OVERWRITE"
     fi
     
     if [[ "$OVERWRITE" =~ ^[Yy]$ ]]; then
@@ -270,21 +268,30 @@ else
 fi
 echo ""
 
-# ==================== 配置限速策略 ====================
+# ==================== 配置限速策略（无人值守模式）====================
 echo -e "${YELLOW}[6/7] 配置队列调度器和带宽限制...${NC}"
 
-if [ "$SILENT_MODE" = false ] && [ -z "$PT_RATE" ]; then
+# 无人值守模式：直接使用默认配置，不再询问
+RATE_OPTION=$DEFAULT_RATE_OPTION
+
+if [ "$SILENT_MODE" = true ]; then
+    case $RATE_OPTION in
+        1) echo "  → 使用限速策略: 2.5Gbps (2.3Gbps)" ;;
+        2) echo "  → 使用限速策略: 10Gbps 单流 (9.5Gbps)" ;;
+        3) echo "  → 使用限速策略: 10Gbps 多流 (8Gbps)" ;;
+        4) echo "  → 使用限速策略: 10Gbps 保守 (7Gbps)" ;;
+        5) echo "  → 使用限速策略: 不限速 (推荐)" ;;
+    esac
+else
+    # 交互模式：显示选项
     echo -e "${YELLOW}请选择限速策略：${NC}"
     echo "1) 2.5Gbps 多流优化 (限速 2.3Gbps)"
     echo "2) 10Gbps 单客户端优化 (限速 9.5Gbps)"
-    echo "3) 10Gbps 多客户端/多流优化 (限速 8Gbps，推荐)"
+    echo "3) 10Gbps 多客户端/多流优化 (限速 8Gbps)"
     echo "4) 10Gbps 保守策略 (限速 7Gbps)"
-    echo "5) 不限速 (不推荐)"
-    read -p "请输入选项 [1-5] (默认: $DEFAULT_RATE_OPTION): " RATE_OPTION
-    RATE_OPTION=${RATE_OPTION:-$DEFAULT_RATE_OPTION}
-else
-    RATE_OPTION=$DEFAULT_RATE_OPTION
-    echo "  使用限速策略: $RATE_OPTION"
+    echo "5) 不限速 (推荐)"
+    read -p "请输入选项 [1-5] (默认: 5): " RATE_OPTION
+    RATE_OPTION=${RATE_OPTION:-5}
 fi
 
 case $RATE_OPTION in
@@ -293,7 +300,7 @@ case $RATE_OPTION in
     3) MAXRATE="8gbit" ;;
     4) MAXRATE="7gbit" ;;
     5) MAXRATE="" ;;
-    *) MAXRATE="8gbit" ;;
+    *) MAXRATE="" ;;
 esac
 
 # 清理旧规则
@@ -371,8 +378,8 @@ EOF
     
     chmod +x /usr/local/bin/pt-tc-setup.sh
     systemctl daemon-reload
-    systemctl enable pt-tc-optimizer.service
-    systemctl start pt-tc-optimizer.service
+    systemctl enable pt-tc-optimizer.service 2>/dev/null
+    systemctl start pt-tc-optimizer.service 2>/dev/null
     echo -e "${GREEN}✓ 已创建 systemd 服务${NC}"
 
 elif [ -f /etc/rc.local ]; then
@@ -421,6 +428,3 @@ else
         fi
     fi
 fi
-
-
-
