@@ -429,7 +429,8 @@
 #!/bin/bash
 
 ###############################################################################
-# PT 上传优化脚本 - 精简版 v5.0
+# PT 上传优化脚本 - 精简版 v5.1
+# 新增：自动检测网卡速率并适配限速策略
 # 专注：TCP 参数优化 + BBR/FQ 配置
 # 前提：用户已自行安装 BBRv3 内核
 # 作者：Claude | 更新日期：2025-12-06
@@ -446,7 +447,7 @@ NC='\033[0m'
 
 # ==================== 默认配置 ====================
 DEFAULT_INTERFACE=""
-DEFAULT_RATE_OPTION="1"
+DEFAULT_RATE_OPTION="5"        # 5=不限速 / auto / 1-4
 DEFAULT_BBR_VERSION="bbr"      # bbr / bbr2 / bbr3 / cubic
 AUTO_REBOOT="n"
 SILENT_MODE=true
@@ -454,7 +455,7 @@ SILENT_MODE=true
 show_help() {
     cat << EOF
 ${GREEN}═══════════════════════════════════════════════════${NC}
-${GREEN}  PT 上传优化脚本 v5.0 - 精简版${NC}
+${GREEN}  PT 上传优化脚本 v5.1 - 自动检测版${NC}
 ${GREEN}  专注 TCP 参数 + BBR/FQ 配置${NC}
 ${GREEN}═══════════════════════════════════════════════════${NC}
 
@@ -463,12 +464,13 @@ ${YELLOW}用法：${NC}
 
 ${YELLOW}选项：${NC}
     -i, --interface <网卡>      指定网络接口
-    -r, --rate <1-5>            限速策略
+    -r, --rate <auto|1-5>       限速策略
+                                  auto) 自动检测
                                   1) 2.5Gbps (2.3Gbps)
                                   2) 10Gbps 单流 (9.5Gbps)
-                                  3) 10Gbps 多流 (8Gbps) [默认]
+                                  3) 10Gbps 多流 (8Gbps)
                                   4) 10Gbps 保守 (7Gbps)
-                                  5) 不限速
+                                  5) 不限速 [默认]
     -b, --bbr <版本>            BBR 版本：bbr3/bbr2/bbr/cubic
     -R, --reboot                配置完成后自动重启
     -y, --yes                   无人值守模式
@@ -478,15 +480,15 @@ ${CYAN}示例：${NC}
     # 完全自动化（推荐）
     $0 -y -R
 
-    # 指定网卡 + BBR v3
-    $0 -i eth0 -b bbr3
+    # 指定网卡 + 自动检测速率
+    $0 -i eth0 -y
 
-    # 不限速 + BBR v2
-    $0 -i ens33 -r 5 -b bbr2
+    # 手动指定限速 + BBR v3
+    $0 -i eth0 -r 3 -b bbr3
 
 ${CYAN}环境变量：${NC}
     PT_INTERFACE=eth0
-    PT_RATE=3
+    PT_RATE=5              # 默认不限速
     PT_BBR=bbr3
     PT_AUTO_REBOOT=y
 
@@ -513,7 +515,7 @@ DEFAULT_BBR_VERSION=${PT_BBR:-$DEFAULT_BBR_VERSION}
 AUTO_REBOOT=${PT_AUTO_REBOOT:-$AUTO_REBOOT}
 
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  PT 上传优化脚本 v5.0 - 精简版${NC}"
+echo -e "${GREEN}  PT 上传优化脚本 v5.1 - 自动检测版${NC}"
 echo -e "${GREEN}  模式: $([ "$SILENT_MODE" = true ] && echo "无人值守" || echo "交互式")${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
@@ -566,8 +568,9 @@ fi
 echo -e "${GREEN}✓ 网卡: $NETWORK_INTERFACE${NC}"
 
 # 网卡信息
-LINK_SPEED=$(ethtool $NETWORK_INTERFACE 2>/dev/null | grep "Speed:" | awk '{print $2}' || echo "Unknown")
-echo -e "${GREEN}  速率: $LINK_SPEED${NC}"
+LINK_SPEED=$(ethtool $NETWORK_INTERFACE 2>/dev/null | grep "Speed:" | awk '{print $2}' | sed 's/[^0-9]//g' || echo "0")
+LINK_SPEED_DISPLAY=$(ethtool $NETWORK_INTERFACE 2>/dev/null | grep "Speed:" | awk '{print $2}' || echo "Unknown")
+echo -e "${GREEN}  速率: $LINK_SPEED_DISPLAY${NC}"
 
 # 检测队列类型
 QDISC_TYPE=$(tc qdisc show dev $NETWORK_INTERFACE | head -n1 | awk '{print $2}')
@@ -655,31 +658,55 @@ modprobe tcp_bbr 2>/dev/null || true
 echo -e "${GREEN}✓ BBR 模块已加载${NC}"
 echo ""
 
-# ==================== 配置 TC 队列 ====================
+# ==================== 配置 TC 队列（自动检测速率）====================
 echo -e "${YELLOW}[4/5] 配置 TC 队列（FQ）...${NC}"
 
-# 选择限速
-if [ "$SILENT_MODE" = false ]; then
-    echo "限速策略："
-    echo "1) 2.5Gbps (2.3Gbps)"
-    echo "2) 10Gbps 单流 (9.5Gbps)"
-    echo "3) 10Gbps 多流 (8Gbps)"
-    echo "4) 10Gbps 保守 (7Gbps)"
-    echo "5) 不限速"
-    read -p "选择 [1-5] (默认: 3): " RATE_OPTION
-    RATE_OPTION=${RATE_OPTION:-$DEFAULT_RATE_OPTION}
+# 自动检测速率并选择限速策略
+if [ "$DEFAULT_RATE_OPTION" = "auto" ]; then
+    echo -e "${BLUE}  正在根据网卡速率自动选择限速策略...${NC}"
+    
+    if [ "$LINK_SPEED" -ge 40000 ]; then
+        # 40Gbps 及以上
+        RATE_OPTION="5"
+        echo -e "${GREEN}  检测到 ${LINK_SPEED_DISPLAY} 网卡 → 选择策略 5: 不限速${NC}"
+    elif [ "$LINK_SPEED" -ge 10000 ]; then
+        # 10Gbps
+        RATE_OPTION="3"
+        echo -e "${GREEN}  检测到 ${LINK_SPEED_DISPLAY} 网卡 → 选择策略 3: 10Gbps 多流 (8Gbps)${NC}"
+    elif [ "$LINK_SPEED" -ge 2500 ]; then
+        # 2.5Gbps - 10Gbps 之间
+        RATE_OPTION="1"
+        echo -e "${GREEN}  检测到 ${LINK_SPEED_DISPLAY} 网卡 → 选择策略 1: 2.5Gbps (2.3Gbps)${NC}"
+    elif [ "$LINK_SPEED" -ge 1000 ]; then
+        # 1Gbps
+        MAXRATE="950mbit"
+        RATE_OPTION="custom"
+        echo -e "${GREEN}  检测到 ${LINK_SPEED_DISPLAY} 网卡 → 使用自定义限速: 950Mbit${NC}"
+    else
+        # 小于 1Gbps 或检测失败
+        RATE_OPTION="5"
+        echo -e "${YELLOW}  无法准确检测速率 → 选择策略 5: 不限速${NC}"
+    fi
+elif [[ "$DEFAULT_RATE_OPTION" =~ ^[1-5]$ ]]; then
+    RATE_OPTION="$DEFAULT_RATE_OPTION"
+    echo -e "${BLUE}  使用手动指定的策略: $RATE_OPTION${NC}"
 else
-    RATE_OPTION=$DEFAULT_RATE_OPTION
+    echo -e "${RED}  无效的速率选项: $DEFAULT_RATE_OPTION${NC}"
+    RATE_OPTION="3"
+    echo -e "${YELLOW}  使用默认策略: 3 (10Gbps 多流)${NC}"
 fi
 
-case $RATE_OPTION in
-    1) MAXRATE="2.3gbit" ;;
-    2) MAXRATE="9.5gbit" ;;
-    3) MAXRATE="8gbit" ;;
-    4) MAXRATE="7gbit" ;;
-    5) MAXRATE="" ;;
-    *) MAXRATE="8gbit" ;;
-esac
+# 根据策略设置限速
+if [ "$RATE_OPTION" != "custom" ]; then
+    case $RATE_OPTION in
+        1) MAXRATE="2.3gbit" ;;
+        2) MAXRATE="9.5gbit" ;;
+        3) MAXRATE="8gbit" ;;
+        4) MAXRATE="7gbit" ;;
+        5) MAXRATE="" ;;
+        *) MAXRATE="8gbit" ;;
+    esac
+fi
 
 # 删除旧规则
 tc qdisc del dev $NETWORK_INTERFACE root 2>/dev/null || true
@@ -762,10 +789,11 @@ echo -e "${GREEN}  配置完成！${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "${CYAN}【配置摘要】${NC}"
-echo "  网卡: $NETWORK_INTERFACE ($LINK_SPEED)"
+echo "  网卡: $NETWORK_INTERFACE ($LINK_SPEED_DISPLAY)"
 echo "  拥塞控制: $DEFAULT_BBR_VERSION"
 echo "  队列算法: FQ (Fair Queue)"
 echo "  限速: ${MAXRATE:-不限速}"
+echo "  策略: $([ "$DEFAULT_RATE_OPTION" = "auto" ] && echo "自动检测" || echo "手动指定")"
 echo ""
 echo -e "${CYAN}【当前状态】${NC}"
 echo "  BBR 状态: $(lsmod | grep tcp_bbr >/dev/null && echo "✓ 已加载" || echo "✗ 未加载")"
@@ -806,4 +834,3 @@ else
 fi
 
 echo -e "${GREEN}配置完成！${NC}"
-# echo -e "${GREEN}脚本执行完成！${NC}"
