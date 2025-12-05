@@ -22,7 +22,7 @@ DEFAULT_INTERFACE=""
 DEFAULT_RATE_OPTION="5"        # 5=不限速 / auto / 1-4
 DEFAULT_BBR_VERSION="bbr"      # bbr / bbr2 / bbr3 / cubic
 AUTO_REBOOT="n"
-SILENT_MODE=true
+SILENT_MODE=false
 
 show_help() {
     cat << EOF
