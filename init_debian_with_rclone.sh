@@ -10,6 +10,45 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 显示帮助信息
+show_help() {
+    cat << EOF
+${GREEN}Debian 系统完整初始化脚本 (含 Rclone)${NC}
+
+使用方法:
+  $0 [选项]
+
+选项:
+  -h, --help              显示此帮助信息
+  --host <hostname>       设置主机名
+  --dirs                  创建目录结构
+  --software              安装常用软件包
+  --locale                设置中文语言环境 (zh_CN.UTF-8)
+  --swap                  创建 6G swap 文件
+  --cifs <entries>        挂载 CIFS,多个条目用 ';' 分隔
+  --rclone                安装最新版 Rclone
+  --rclone-service        创建 Rclone 挂载服务
+  --tz <timezone>         设置时区 (例如: Asia/Shanghai)
+  --reboot                完成后自动重启
+  --all                   执行所有功能 (除了 CIFS 和主机名)
+  --interactive           交互式模式 (默认)
+
+示例:
+  # 设置主机名、时区并重启
+  $0 --host Netcup --tz Asia/Shanghai --reboot
+
+  # 完整部署: 安装软件、设置语言、创建swap、安装rclone
+  $0 --host MyServer --software --locale --swap --rclone --rclone-service --tz Asia/Shanghai --dirs --reboot
+
+  # 挂载 CIFS (多个条目用分号分隔)
+  $0 --cifs "//192.168.1.100/share1 /mnt/share1 cifs username=user,password=pass,vers=3.0 0 0;//192.168.1.100/share2 /mnt/share2 cifs username=user,password=pass,vers=3.0 0 0"
+
+  # 一条龙部署 (自动包含所有基础功能)
+  $0 --all --host Netcup --tz Asia/Shanghai --reboot
+
+EOF
+}
+
 # 用户确认函数
 ask_user() {
     local prompt="$1"
@@ -25,10 +64,7 @@ ask_user() {
     done
 }
 
-echo -e "${GREEN}🔧 Debian 系统完整初始化脚本 (含 Rclone)${NC}"
-echo -e "${BLUE}请选择需要执行的功能：${NC}"
-
-# 预先询问所有功能选项
+# 默认值
 SET_HOSTNAME=false
 CREATE_DIRS=false
 INSTALL_SOFTWARE=false
@@ -40,106 +76,198 @@ INSTALL_RCLONE=false
 CREATE_RCLONE_SERVICE=false
 REBOOT_SYSTEM=false
 SET_TIMEZONE=false
+INTERACTIVE_MODE=true
+NEW_HOSTNAME=""
+TIMEZONE=""
+CIFS_ENTRIES=()
 
-# 主机名设置
-if ask_user "1️⃣ 是否需要设置主机名？"; then
-    SET_HOSTNAME=true
-    echo -e "${BLUE}请输入新的主机名:${NC}"
-    read -r NEW_HOSTNAME
-    if [ -z "$NEW_HOSTNAME" ]; then
-        echo -e "${YELLOW}⚠️ 主机名为空，将跳过此功能${NC}"
-        SET_HOSTNAME=false
-    fi
-fi
+# 解析命令行参数
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        --host)
+            SET_HOSTNAME=true
+            NEW_HOSTNAME="$2"
+            INTERACTIVE_MODE=false
+            shift 2
+            ;;
+        --dirs)
+            CREATE_DIRS=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --software)
+            INSTALL_SOFTWARE=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --locale)
+            SET_LOCALE=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --swap)
+            CREATE_SWAP=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --cifs)
+            MOUNT_CIFS=true
+            IFS=';' read -ra CIFS_ENTRIES <<< "$2"
+            INTERACTIVE_MODE=false
+            shift 2
+            ;;
+        --rclone)
+            INSTALL_RCLONE=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --rclone-service)
+            CREATE_RCLONE_SERVICE=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --tz)
+            SET_TIMEZONE=true
+            TIMEZONE="$2"
+            INTERACTIVE_MODE=false
+            shift 2
+            ;;
+        --reboot)
+            REBOOT_SYSTEM=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --all)
+            CREATE_DIRS=true
+            INSTALL_SOFTWARE=true
+            SET_LOCALE=true
+            CREATE_SWAP=true
+            INSTALL_RCLONE=true
+            CREATE_RCLONE_SERVICE=true
+            INTERACTIVE_MODE=false
+            shift
+            ;;
+        --interactive)
+            INTERACTIVE_MODE=true
+            shift
+            ;;
+        *)
+            echo -e "${RED}未知选项: $1${NC}"
+            show_help
+            exit 1
+            ;;
+    esac
+done
 
-# 创建目录
-if ask_user "2️⃣ 是否需要创建目录结构？"; then
-    CREATE_DIRS=true
-fi
+# 交互式模式
+if [ "$INTERACTIVE_MODE" = true ]; then
+    echo -e "${GREEN}🔧 Debian 系统完整初始化脚本 (含 Rclone)${NC}"
+    echo -e "${BLUE}请选择需要执行的功能：${NC}"
 
-# 安装软件
-if ask_user "3️⃣ 是否需要安装常用软件包？"; then
-    INSTALL_SOFTWARE=true
-    echo -e "${BLUE}将安装以下软件包:${NC}"
-    echo -e "${YELLOW}基础工具: screen rsync wget curl unzip${NC}"
-    echo -e "${YELLOW}系统工具: cifs-utils locales fuse3${NC}"
-    echo -e "${YELLOW}开发工具: git vim nano htop tree${NC}"
-    echo -e "${YELLOW}网络工具: net-tools dnsutils${NC}"
-fi
-
-# 设置语言环境
-if ask_user "4️⃣ 是否需要设置中文语言环境 (zh_CN.UTF-8)？"; then
-    SET_LOCALE=true
-fi
-
-# 设置swap
-if ask_user "5️⃣ 是否需要设置 6G swap 文件？"; then
-    CREATE_SWAP=true
-fi
-
-# CIFS挂载
-if ask_user "6️⃣ 是否需要挂载 CIFS 网络共享盘？"; then
-    MOUNT_CIFS=true
-    echo -e "${YELLOW}📝 CIFS 挂载配置说明：${NC}"
-    echo -e "${YELLOW}请准备你的 fstab 挂载条目，格式如下：${NC}"
-    echo -e "${BLUE}//服务器IP/共享名 /挂载点 cifs username=用户名,password=密码,vers=3.0,其他选项 0 0${NC}"
-    echo
-    
-    CIFS_ENTRIES=()
-    ENTRY_COUNT=0
-    
-    while true; do
-        ENTRY_COUNT=$((ENTRY_COUNT + 1))
-        echo -e "${BLUE}请输入第 $ENTRY_COUNT 个 CIFS 挂载条目（完整的 fstab 行）:${NC}"
-        echo -e "${YELLOW}提示：直接粘贴完整的挂载行，或输入 'done' 完成输入${NC}"
-        read -r CIFS_ENTRY
-        
-        if [ "$CIFS_ENTRY" = "done" ]; then
-            break
+    # 主机名设置
+    if ask_user "1️⃣ 是否需要设置主机名？"; then
+        SET_HOSTNAME=true
+        echo -e "${BLUE}请输入新的主机名:${NC}"
+        read -r NEW_HOSTNAME
+        if [ -z "$NEW_HOSTNAME" ]; then
+            echo -e "${YELLOW}⚠️ 主机名为空，将跳过此功能${NC}"
+            SET_HOSTNAME=false
         fi
+    fi
+
+    # 创建目录
+    if ask_user "2️⃣ 是否需要创建目录结构？"; then
+        CREATE_DIRS=true
+    fi
+
+    # 安装软件
+    if ask_user "3️⃣ 是否需要安装常用软件包？"; then
+        INSTALL_SOFTWARE=true
+        echo -e "${BLUE}将安装以下软件包:${NC}"
+        echo -e "${YELLOW}基础工具: screen rsync wget curl unzip${NC}"
+        echo -e "${YELLOW}系统工具: cifs-utils locales fuse3${NC}"
+        echo -e "${YELLOW}开发工具: git vim nano htop tree${NC}"
+        echo -e "${YELLOW}网络工具: net-tools dnsutils${NC}"
+    fi
+
+    # 设置语言环境
+    if ask_user "4️⃣ 是否需要设置中文语言环境 (zh_CN.UTF-8)？"; then
+        SET_LOCALE=true
+    fi
+
+    # 设置swap
+    if ask_user "5️⃣ 是否需要设置 6G swap 文件？"; then
+        CREATE_SWAP=true
+    fi
+
+    # CIFS挂载
+    if ask_user "6️⃣ 是否需要挂载 CIFS 网络共享盘？"; then
+        MOUNT_CIFS=true
+        echo -e "${YELLOW}📝 CIFS 挂载配置说明：${NC}"
+        echo -e "${YELLOW}请准备你的 fstab 挂载条目，格式如下：${NC}"
+        echo -e "${BLUE}//服务器IP/共享名 /挂载点 cifs username=用户名,password=密码,vers=3.0,其他选项 0 0${NC}"
+        echo
         
-        if [ -n "$CIFS_ENTRY" ]; then
-            CIFS_ENTRIES+=("$CIFS_ENTRY")
-            echo -e "${GREEN}✅ 已添加挂载条目 $ENTRY_COUNT: $CIFS_ENTRY${NC}"
+        ENTRY_COUNT=0
+        
+        while true; do
+            ENTRY_COUNT=$((ENTRY_COUNT + 1))
+            echo -e "${BLUE}请输入第 $ENTRY_COUNT 个 CIFS 挂载条目（完整的 fstab 行）:${NC}"
+            echo -e "${YELLOW}提示：直接粘贴完整的挂载行，或输入 'done' 完成输入${NC}"
+            read -r CIFS_ENTRY
             
-            if ! ask_user "是否继续添加更多挂载条目？"; then
+            if [ "$CIFS_ENTRY" = "done" ]; then
                 break
             fi
-        else
-            echo -e "${RED}❌ 输入为空，请重新输入${NC}"
-            ENTRY_COUNT=$((ENTRY_COUNT - 1))
+            
+            if [ -n "$CIFS_ENTRY" ]; then
+                CIFS_ENTRIES+=("$CIFS_ENTRY")
+                echo -e "${GREEN}✅ 已添加挂载条目 $ENTRY_COUNT: $CIFS_ENTRY${NC}"
+                
+                if ! ask_user "是否继续添加更多挂载条目？"; then
+                    break
+                fi
+            else
+                echo -e "${RED}❌ 输入为空，请重新输入${NC}"
+                ENTRY_COUNT=$((ENTRY_COUNT - 1))
+            fi
+        done
+        
+        if [ ${#CIFS_ENTRIES[@]} -eq 0 ]; then
+            echo -e "${YELLOW}⚠️ 未输入任何挂载条目，将跳过 CIFS 挂载${NC}"
+            MOUNT_CIFS=false
         fi
-    done
-    
-    if [ ${#CIFS_ENTRIES[@]} -eq 0 ]; then
-        echo -e "${YELLOW}⚠️ 未输入任何挂载条目，将跳过 CIFS 挂载${NC}"
-        MOUNT_CIFS=false
     fi
-fi
 
-# BBR加速 - 暂时移除，不询问
-# if ask_user "7️⃣ 是否需要启用 TCP BBR 加速？"; then
-#     ENABLE_BBR=true
-# fi
+    # 安装 Rclone
+    if ask_user "7️⃣ 是否需要安装最新版 Rclone？"; then
+        INSTALL_RCLONE=true
+    fi
 
-# 安装 Rclone
-if ask_user "7️⃣ 是否需要安装最新版 Rclone？"; then
-    INSTALL_RCLONE=true
-fi
+    # 创建 Rclone 服务
+    if ask_user "8️⃣ 是否需要创建 Rclone 挂载服务？"; then
+        CREATE_RCLONE_SERVICE=true
+    fi
 
-# 创建 Rclone 服务
-if ask_user "8️⃣ 是否需要创建 Rclone 挂载服务？"; then
-    CREATE_RCLONE_SERVICE=true
-fi
+    # 设置时区
+    if ask_user "9️⃣ 是否需要设置系统时区？"; then
+        SET_TIMEZONE=true
+        echo -e "${BLUE}请输入时区（例如: Asia/Shanghai）:${NC}"
+        read -r TIMEZONE
+        if [ -z "$TIMEZONE" ]; then
+            echo -e "${YELLOW}⚠️ 时区为空，将跳过此功能${NC}"
+            SET_TIMEZONE=false
+        fi
+    fi
 
-# 设置时区
-if ask_user "9️⃣ 是否需要将系统时区设置为 Asia/Shanghai？"; then
-    SET_TIMEZONE=true
-fi
-
-# 重启系统
-if ask_user "🔟 完成后是否需要立即重启系统？"; then
-    REBOOT_SYSTEM=true
+    # 重启系统
+    if ask_user "🔟 完成后是否需要立即重启系统？"; then
+        REBOOT_SYSTEM=true
+    fi
 fi
 
 echo -e "${GREEN}========================================${NC}"
@@ -149,11 +277,8 @@ echo -e "${GREEN}========================================${NC}"
 # 0️⃣ 设置主机名
 if [ "$SET_HOSTNAME" = true ]; then
     echo -e "${BLUE}🔧 设置主机名为: $NEW_HOSTNAME${NC}"
-    # 设置主机名
     hostnamectl set-hostname "$NEW_HOSTNAME"
-    # 更新 /etc/hosts
     sed -i "s/127.0.1.1.*/127.0.1.1\t$NEW_HOSTNAME/" /etc/hosts
-    # 如果没有找到 127.0.1.1 行，则添加
     if ! grep -q "127.0.1.1" /etc/hosts; then
         echo -e "127.0.1.1\t$NEW_HOSTNAME" >> /etc/hosts
     fi
@@ -206,13 +331,10 @@ fi
 if [ "$MOUNT_CIFS" = true ]; then
     echo -e "${BLUE}🔧 挂载 CIFS 网络共享盘...${NC}"
     
-    # 备份 fstab
     cp /etc/fstab /etc/fstab.bak.$(date +%F-%H-%M-%S)
 
-    # 添加用户输入的挂载项
     for entry in "${CIFS_ENTRIES[@]}"; do
         echo -e "${BLUE}添加挂载条目: $entry${NC}"
-        # 检查是否已存在相同的挂载条目
         if ! grep -qF -- "$entry" /etc/fstab; then
             echo "$entry" >> /etc/fstab
             echo -e "${GREEN}✅ 已添加到 fstab${NC}"
@@ -221,7 +343,6 @@ if [ "$MOUNT_CIFS" = true ]; then
         fi
     done
 
-    # 创建挂载点目录（从 fstab 条目中提取挂载点）
     for entry in "${CIFS_ENTRIES[@]}"; do
         MOUNT_POINT=$(echo "$entry" | awk '{print $2}')
         if [ -n "$MOUNT_POINT" ]; then
@@ -230,7 +351,6 @@ if [ "$MOUNT_CIFS" = true ]; then
         fi
     done
 
-    # 执行挂载
     echo -e "${BLUE}正在执行挂载...${NC}"
     if mount -a; then
         echo -e "${GREEN}✅ CIFS 共享盘挂载完成${NC}"
@@ -254,7 +374,6 @@ EOF
 
     sysctl -p
 
-    # 验证是否启用成功
     if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
         echo -e "${GREEN}✅ BBR 已启用成功${NC}"
     else
@@ -266,31 +385,24 @@ fi
 if [ "$INSTALL_RCLONE" = true ]; then
     echo -e "${BLUE}🔧 安装最新版 Rclone...${NC}"
     
-    # 进入临时目录
     cd /tmp
     
-    # 下载最新版 rclone
     echo -e "${BLUE}正在下载 Rclone...${NC}"
     wget -q https://downloads.rclone.org/rclone-current-linux-amd64.zip -O rclone-current-linux-amd64.zip
     
-    # 解压
     echo -e "${BLUE}正在解压 Rclone...${NC}"
     unzip -q rclone-current-linux-amd64.zip
     
-    # 进入解压目录
     cd rclone-*-linux-amd64
     
-    # 替换二进制文件
     echo -e "${BLUE}正在安装 Rclone...${NC}"
     cp rclone /usr/bin/
     chown root:root /usr/bin/rclone
     chmod 755 /usr/bin/rclone
     
-    # 清理临时文件
     cd /
     rm -rf /tmp/rclone-*
     
-    # 验证安装
     if command -v rclone &> /dev/null; then
         RCLONE_VERSION=$(rclone version | head -n 1)
         echo -e "${GREEN}✅ Rclone 安装成功: $RCLONE_VERSION${NC}"
@@ -303,7 +415,6 @@ fi
 if [ "$CREATE_RCLONE_SERVICE" = true ]; then
     echo -e "${BLUE}🔧 创建 Rclone 挂载服务...${NC}"
     
-    # 创建 systemd 服务文件
     cat > /etc/systemd/system/rclone-mount.service << 'EOF'
 [Unit]
 Description=Rclone Mount
@@ -349,10 +460,7 @@ KillMode=process
 WantedBy=multi-user.target
 EOF
 
-    # 重新加载 systemd
     systemctl daemon-reload
-    
-    # 启用服务（但不立即启动，因为需要先配置 rclone）
     systemctl enable rclone-mount.service
     
     echo -e "${GREEN}✅ Rclone 挂载服务已创建并启用${NC}"
@@ -361,13 +469,17 @@ EOF
     echo -e "${BLUE}   systemctl status rclone-mount${NC}"
 fi
 
-# 9️⃣ 设置时区为 Asia/Shanghai
+# 9️⃣ 设置时区
 if [ "$SET_TIMEZONE" = true ]; then
-    echo -e "${BLUE}🔧 设置时区为 Asia/Shanghai...${NC}"
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-    echo "Asia/Shanghai" > /etc/timezone
-    dpkg-reconfigure -f noninteractive tzdata
-    echo -e "${GREEN}✅ 系统时区已设置为 Asia/Shanghai${NC}"
+    echo -e "${BLUE}🔧 设置时区为 $TIMEZONE...${NC}"
+    if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+        ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+        echo "$TIMEZONE" > /etc/timezone
+        dpkg-reconfigure -f noninteractive tzdata
+        echo -e "${GREEN}✅ 系统时区已设置为 $TIMEZONE${NC}"
+    else
+        echo -e "${RED}❌ 时区 $TIMEZONE 不存在，请检查输入${NC}"
+    fi
 fi
 
 echo -e "${GREEN}========================================${NC}"
