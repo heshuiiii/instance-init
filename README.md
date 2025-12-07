@@ -11,6 +11,8 @@ wget -O mult_qb_enhanced.sh "https://raw.githubusercontent.com/heshuiiii/instanc
 ## 初始化服务器
 ```
 wget -O init_debian_with_rclone.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/init_debian_with_rclone.sh" && bash init_debian_with_rclone.sh
+wget -O init_debian_with_rclone.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/init_debian_with_rclone.sh" && bash init_debian_with_rclone.sh --host Netcup --locale --tz Asia/Shanghai
+
 ```
 ```
 wget -O smb_auto_config.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/smb_auto_config.sh" && bash smb_auto_config.sh
