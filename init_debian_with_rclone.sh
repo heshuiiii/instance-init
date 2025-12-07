@@ -188,7 +188,7 @@ if [ "$INTERACTIVE_MODE" = true ]; then
     if ask_user "3️⃣ 是否需要安装常用软件包？"; then
         INSTALL_SOFTWARE=true
         echo -e "${BLUE}将安装以下软件包:${NC}"
-        echo -e "${YELLOW}基础工具: screen rsync wget curl unzip${NC}"
+        echo -e "${YELLOW}基础工具: screen rsync wget curl unzip vnstat${NC}"
         echo -e "${YELLOW}系统工具: cifs-utils locales fuse3${NC}"
         echo -e "${YELLOW}开发工具: git vim nano htop tree${NC}"
         echo -e "${YELLOW}网络工具: net-tools dnsutils${NC}"
@@ -298,7 +298,7 @@ fi
 # 2️⃣ 安装常用软件
 if [ "$INSTALL_SOFTWARE" = true ]; then
     echo -e "${BLUE}🔧 安装常用软件...${NC}"
-    apt update && apt install -y screen rsync wget curl cifs-utils locales unzip fuse3
+    apt update && apt install -y screen rsync wget curl cifs-utils locales unzip fuse3 vnstat
     echo -e "${GREEN}✅ 常用软件安装完成${NC}"
 fi
 
