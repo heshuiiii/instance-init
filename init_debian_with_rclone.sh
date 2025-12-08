@@ -417,16 +417,27 @@ if [ "$CREATE_RCLONE_SERVICE" = true ]; then
     
     cat > /etc/systemd/system/rclone-mount.service << 'EOF'
 [Unit]
-Description=Rclone Mount
+Description=Rclone Mount Service (Multiple Remotes)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=notify
 User=root
-ExecStartPre=/bin/mkdir -p /home/mnt/Rclone
-ExecStartPre=-/bin/umount /home/mnt/Rclone
-ExecStart=/usr/bin/rclone mount openlist:/ /home/mnt/Rclone \
+Environment=RCLONE_CONFIG=/root/.config/rclone/rclone.conf
+
+# 创建所有挂载点目录
+ExecStartPre=/bin/mkdir -p /home/mnt/Rclone/OpenList
+ExecStartPre=/bin/mkdir -p /home/mnt/Rclone/Onedrive
+ExecStartPre=/bin/mkdir -p /home/mnt/Rclone/Onedrive1
+
+# 卸载可能存在的旧挂载
+ExecStartPre=-/bin/fusermount -uz /home/mnt/Rclone/OpenList
+ExecStartPre=-/bin/fusermount -uz /home/mnt/Rclone/Onedrive
+ExecStartPre=-/bin/fusermount -uz /home/mnt/Rclone/Onedrive1
+
+# 主挂载进程 - OpenList
+ExecStart=/usr/bin/rclone mount openlist:/ /home/mnt/Rclone/OpenList \
   --config=/root/.config/rclone/rclone.conf \
   --allow-other \
   --allow-non-empty \
@@ -447,11 +458,70 @@ ExecStart=/usr/bin/rclone mount openlist:/ /home/mnt/Rclone \
   --uid 1000 \
   --gid 1000 \
   --log-level INFO \
-  --log-file /var/log/rclone-mount.log \
+  --log-file /var/log/rclone-openlist.log \
   --rc \
   --rc-addr 127.0.0.1:5572 \
   --rc-no-auth
-ExecStop=/bin/umount /home/mnt/Rclone
+
+# 后台挂载 OneDrive
+ExecStartPost=/bin/bash -c 'sleep 3 && /usr/bin/rclone mount onedrive:/ /home/mnt/Rclone/Onedrive \
+  --config=/root/.config/rclone/rclone.conf \
+  --allow-other \
+  --allow-non-empty \
+  --dir-cache-time 5m \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 10G \
+  --vfs-cache-max-age 24h \
+  --vfs-read-chunk-size 256M \
+  --vfs-read-chunk-size-limit 2G \
+  --buffer-size 128M \
+  --transfers 4 \
+  --checkers 8 \
+  --attr-timeout 5m \
+  --poll-interval 30s \
+  --vfs-refresh \
+  --no-modtime \
+  --umask 022 \
+  --uid 1000 \
+  --gid 1000 \
+  --log-level INFO \
+  --log-file /var/log/rclone-onedrive.log \
+  --daemon'
+
+# 后台挂载 OneDrive1
+ExecStartPost=/bin/bash -c 'sleep 5 && /usr/bin/rclone mount onedrive1:/ /home/mnt/Rclone/Onedrive1 \
+  --config=/root/.config/rclone/rclone.conf \
+  --allow-other \
+  --allow-non-empty \
+  --dir-cache-time 5m \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 10G \
+  --vfs-cache-max-age 24h \
+  --vfs-read-chunk-size 256M \
+  --vfs-read-chunk-size-limit 2G \
+  --buffer-size 128M \
+  --transfers 4 \
+  --checkers 8 \
+  --attr-timeout 5m \
+  --poll-interval 30s \
+  --vfs-refresh \
+  --no-modtime \
+  --umask 022 \
+  --uid 1000 \
+  --gid 1000 \
+  --log-level INFO \
+  --log-file /var/log/rclone-onedrive1.log \
+  --daemon'
+
+# 停止时卸载所有挂载点
+ExecStop=/bin/bash -c 'fusermount -uz /home/mnt/Rclone/Onedrive1 || true'
+ExecStop=/bin/bash -c 'fusermount -uz /home/mnt/Rclone/Onedrive || true'
+ExecStop=/bin/bash -c 'fusermount -uz /home/mnt/Rclone/OpenList || true'
+
+# 清理进程
+ExecStopPost=/bin/bash -c 'pkill -9 -f "rclone mount onedrive" || true'
+ExecStopPost=/bin/bash -c 'pkill -9 -f "rclone mount onedrive1" || true'
+
 Restart=on-failure
 RestartSec=10
 KillMode=process
