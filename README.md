@@ -13,6 +13,9 @@ wget -O mult_qb_enhanced.sh "https://raw.githubusercontent.com/heshuiiii/instanc
 wget -O init_debian_with_rclone.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/init_debian_with_rclone.sh" && bash init_debian_with_rclone.sh
 wget -O init_debian_with_rclone.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/init_debian_with_rclone.sh" && bash init_debian_with_rclone.sh --host Netcup --locale --tz Asia/Shanghai
 
+wget -O pt-brush.sh https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/pt-brush.sh && chmod +x pt-brush.sh && sudo ./pt-brush.sh
+
+
 ```
 ```
 wget -O smb_auto_config.sh "https://raw.githubusercontent.com/heshuiiii/instance-init/refs/heads/main/smb_auto_config.sh" && bash smb_auto_config.sh
